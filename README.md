@@ -32,16 +32,18 @@ Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
 
 ## Results
 
-**Decode, one stream** (`tf-dsv41-lanes` harness, greedy, 384 tokens, MTU 9000). The decode all-gathers go over
-the engine's RDMA ring instead of NCCL. No code change, only settings.
+**Decode** (`tensorfold-native serve`, same settings as production, greedy, 384 tokens, median of 3; MTU 9000). The
+decode all-gathers go over the engine's RDMA ring instead of NCCL. No code change, only settings.
 
-| Prompt | NCCL | RDMA ring | Gain | Same tokens |
+| Prompt | NCCL | RDMA ring | Gain | Same text |
 |---|---:|---:|---:|:---:|
-| code | 80.5 tok/s | **88.9 tok/s** | +10 % | yes |
-| prose | 55.3 tok/s | **60.6 tok/s** | +9 % | yes |
-| structured | 124.3 tok/s | **133.8 tok/s** | +8 % | yes |
+| code, one stream | 90.4 tok/s | **99.1 tok/s** | +10 % | yes |
+| prose, one stream | 55.6 tok/s | **61.4 tok/s** | +10 % | yes |
+| structured, one stream | 127.6 tok/s | **138.2 tok/s** | +8 % | yes |
+| 4 streams, aggregate | 107.3 tok/s | **114.6 tok/s** | +7 % | yes |
 
-Forward per round: 43.1 → 39.9 ms (code), 32.5 → 29.8 ms (prose). Raw rows: `results/decode_nccl_vs_rdma.jsonl`.
+One gather of 1 row (20 KB) takes 9 µs on the ring against 21 µs with NCCL; a decode round does 80 of them. Engine
+harness rows (per-round costs, token hashes): `results/decode_nccl_vs_rdma.jsonl`.
 
 The ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and every
 gather fails, which is why the stock setup runs NCCL. Set MTU 9000 on both RoCE ports of both nodes, then:

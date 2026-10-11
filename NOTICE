@@ -1,0 +1,6 @@
+These patches apply to the `dsv41` family (DeepSeek-V4.1-Flash, TP2 over two GB10 nodes) of a TensorFold fork:
+https://github.com/bertholomus/TensorFold, branch deepseek-v41-zig (Apache-2.0).
+TensorFold: https://github.com/ashhart/TensorFold (Apache-2.0).
+Weights served in the measurements: Mia-AiLab/DeepSeek-V4.1-Flash-EXL3-2.9bpw (MIT), an EXL3 quant of
+deepseek-ai/DeepSeek-V4.1-Flash (MIT).
+Changed files are listed in each patch. Not affiliated with DeepSeek, NVIDIA, the TensorFold authors or Mia-AiLab.

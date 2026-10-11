@@ -1,0 +1,154 @@
+{
+ "args": {
+  "sessions": 3,
+  "turns": 4,
+  "base_words": 33000,
+  "tool_words": 1200,
+  "max_tokens": 96
+ },
+ "summary": {
+  "turns": 15,
+  "later_turns": 12,
+  "later_ttft_s_mean": 33.79703404506048,
+  "later_ttft_s_max": 49.42821907997131,
+  "later_cached_ratio": 0.20993979712666364,
+  "wall_s": 535.7444269657135
+ },
+ "rows": [
+  {
+   "ttft_s": 33.55388593673706,
+   "total_s": 35.194791316986084,
+   "text": "The cache is invalidated in the `cache` handling logic tied to `cache378`, `cache495`, `cache341`, and related cache entries, where stale cached values are cleared or replaced when the associated `model`, `layer`, or `buffer` state changes. In summary, invalidation occurs when a cached result no longer matches the current configuration or input state, causing it to be discarded and recomputed.",
+   "prompt_tokens": 71536,
+   "cached_tokens": 0,
+   "session": 0,
+   "turn": 0
+  },
+  {
+   "ttft_s": 38.51769304275513,
+   "total_s": 39.76497006416321,
+   "text": "I can't determine where the cache is invalidated from this data. The source tree you provided is just a flat list of identifier-like tokens (e.g., `cache478`, `index930`, `error946`) with no file paths, directory structure, code, or relationships between them, so there's no way to locate cache-invalidation logic or summarize it.",
+   "prompt_tokens": 80194,
+   "cached_tokens": 0,
+   "session": 1,
+   "turn": 0
+  },
+  {
+   "ttft_s": 42.931772232055664,
+   "total_s": 43.93943810462952,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 89038,
+   "cached_tokens": 0,
+   "session": 2,
+   "turn": 0
+  },
+  {
+   "ttft_s": 4.635779142379761,
+   "total_s": 5.907920837402344,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache378`, `cache495`, `cache341`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 74235,
+   "cached_tokens": 69632,
+   "session": 0,
+   "turn": 1
+  },
+  {
+   "ttft_s": 39.00428915023804,
+   "total_s": 40.4014151096344,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache681`, `cache645`, `cache495`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or at least grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `",
+   "prompt_tokens": 82882,
+   "cached_tokens": 0,
+   "session": 1,
+   "turn": 1
+  },
+  {
+   "ttft_s": 43.52585434913635,
+   "total_s": 44.17101311683655,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 91711,
+   "cached_tokens": 0,
+   "session": 2,
+   "turn": 1
+  },
+  {
+   "ttft_s": 3.983220338821411,
+   "total_s": 4.909023284912109,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache368`, `cache877`, `cache992`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 76934,
+   "cached_tokens": 73728,
+   "session": 0,
+   "turn": 2
+  },
+  {
+   "ttft_s": 40.6603569984436,
+   "total_s": 41.71141290664673,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache284`, `cache232`, `cache722`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `cache.clear",
+   "prompt_tokens": 85592,
+   "cached_tokens": 0,
+   "session": 1,
+   "turn": 2
+  },
+  {
+   "ttft_s": 45.6260130405426,
+   "total_s": 46.28010702133179,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 94384,
+   "cached_tokens": 0,
+   "session": 2,
+   "turn": 2
+  },
+  {
+   "ttft_s": 4.848468065261841,
+   "total_s": 5.826221227645874,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache699`, `cache560`, `cache773`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 79633,
+   "cached_tokens": 75776,
+   "session": 0,
+   "turn": 3
+  },
+  {
+   "ttft_s": 42.262109994888306,
+   "total_s": 43.2495698928833,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache589`, `cache445`, `cache237`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `cache.clear",
+   "prompt_tokens": 88302,
+   "cached_tokens": 0,
+   "session": 1,
+   "turn": 3
+  },
+  {
+   "ttft_s": 47.37562966346741,
+   "total_s": 48.022061824798584,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 97057,
+   "cached_tokens": 0,
+   "session": 2,
+   "turn": 3
+  },
+  {
+   "ttft_s": 39.78050470352173,
+   "total_s": 40.81689381599426,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache259`, `cache315`, `cache492`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 82332,
+   "cached_tokens": 0,
+   "session": 0,
+   "turn": 4
+  },
+  {
+   "ttft_s": 44.433964014053345,
+   "total_s": 45.46464419364929,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache644`, `cache720`, `cache832`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `cache.clear",
+   "prompt_tokens": 91012,
+   "cached_tokens": 0,
+   "session": 1,
+   "turn": 4
+  },
+  {
+   "ttft_s": 49.42821907997131,
+   "total_s": 50.08494424819946,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 99730,
+   "cached_tokens": 0,
+   "session": 2,
+   "turn": 4
+  }
+ ]
+}

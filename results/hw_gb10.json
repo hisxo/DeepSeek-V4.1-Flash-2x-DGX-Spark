@@ -1,0 +1,23 @@
+{
+ "name": "NVIDIA GB10",
+ "sms": 48,
+ "cc": "12.1",
+ "l2_mb": 24.0,
+ "bandwidth_GBps": {
+  "read_sum_0.25GiB": 238.2,
+  "read_sum_1GiB": 237.4,
+  "read_sum_4GiB": 230.7,
+  "copy_1GiB(r+w)": 213.6,
+  "write_1GiB": 192.8,
+  "read_sum_4MiB(L2)": 509.9
+ },
+ "tflops": {
+  "bf16_8192^3": 94.6,
+  "fp8_8192^3": 199.1,
+  "nvfp4_8192^3": 339.1,
+  "bf16_2048x5120x1152": 84.8,
+  "fp8_2048x5120x1152": 149.4,
+  "bf16_6x5120x1152": 3.5
+ },
+ "tool": "bench/hwbench.py (torch in nvcr.io/nvidia/pytorch:26.07-py3)"
+}

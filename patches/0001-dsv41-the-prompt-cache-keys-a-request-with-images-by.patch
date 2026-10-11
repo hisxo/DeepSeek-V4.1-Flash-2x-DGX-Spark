@@ -1,0 +1,138 @@
+From d4a180c7faa1777f19d6243b3b2cfc75c731b04c Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 16:06:53 +0000
+Subject: [PATCH 1/4] dsv41: the prompt cache keys a request with images by the
+ images' bytes, so its later turns resume
+
+---
+ zig/src/core/lane_host.zig       | 34 ++++++++++++++++++++++++++++----
+ zig/src/families/dsv41/lanes.zig |  9 ++++++---
+ 2 files changed, 36 insertions(+), 7 deletions(-)
+
+diff --git a/zig/src/core/lane_host.zig b/zig/src/core/lane_host.zig
+index 522cff3..85c64d4 100644
+--- a/zig/src/core/lane_host.zig
++++ b/zig/src/core/lane_host.zig
+@@ -62,14 +62,21 @@ pub const LaneHost = struct {
+         prefilled: ?i96 = null,
+         entry: ?*pc.Entry = null, // the kept state the backend restores, until its prompt pass reports
+         marks: []const u32 = &.{}, // where the pass keeps states (gpa-owned)
++        key: []u32 = &.{}, // the prompt as the cache keys it, each image span's tokens made from its bytes (gpa-owned; empty: the prompt)
+         kept0: u64 = 0, // the store's kept count when the job looked it up
+ 
++        /// The tokens the cache keys this request by: the prompt, or with images the prompt whose image spans hold
++        /// tokens made from each image's bytes (past the vocabulary), so two images never share a kept state.
++        fn cacheKey(job: *const Job) []const u32 {
++            return if (job.key.len > 0) job.key else job.request.prompt;
++        }
++
+         /// The backend's prompt pass stands at a mark: the cache keeps the stream's state there.
+         fn kept(ptr: *anyopaque, s: *lanes.Stream, at: u32) void {
+             const job: *Job = @ptrCast(@alignCast(ptr));
+             job.reported(); // before a keep can evict the entry the pass restored
+-            if (job.request.images.len > 0) return; // a kept state is keyed by tokens: an image's are its placeholder's
+-            if (job.host.cache) |store| _ = store.keep(job.request.prompt, at, s, job.request.chunks);
++            if (job.request.images.len > 0 and job.key.len == 0) return; // no key made: nothing kept
++            if (job.host.cache) |store| _ = store.keep(job.cacheKey(), at, s, job.request.chunks);
+         }
+ 
+         /// Report a restored prefix or its failed copy; an untouched prefix remains kept.
+@@ -79,7 +86,7 @@ pub const LaneHost = struct {
+             const store = job.host.cache orelse return;
+             if (!job.started) return;
+             job.stream.reuse.saved = null; // the backend restores before its first chunk; a later keep may free it
+-            if (job.stream.reuse_failed) store.resumed(e, job.request.prompt, false) else if (job.stream.cached == e.at) store.resumed(e, job.request.prompt, true);
++            if (job.stream.reuse_failed) store.resumed(e, job.cacheKey(), false) else if (job.stream.cached == e.at) store.resumed(e, job.cacheKey(), true);
+         }
+     };
+ 
+@@ -221,6 +228,8 @@ pub const LaneHost = struct {
+     fn finish(h: *LaneHost, job: *Job, reason: Reason, message: []const u8) void {
+         job.reported();
+         h.gpa.free(job.marks);
++        if (job.key.len > 0) h.gpa.free(job.key);
++        job.key = &.{};
+         const s = &job.stream;
+         const stats: Stats = if (job.started) .{ .rounds = s.rounds, .drafted = s.drafted, .accepted = s.accepted, .min_rows = s.min_rows, .loop_period = s.loop_period, .prefill_seconds = if (job.prefilled) |done| @as(f64, @floatFromInt(@as(i64, @intCast(@max(0, done - job.began))))) / 1e9 else null } else .{};
+         emit(job, .{ .finished = .{ .reason = reason, .stats = stats, .message = message } });
+@@ -306,7 +315,8 @@ pub const LaneHost = struct {
+         const r = job.request;
+         var reuse: lanes.stream.Reuse = .{};
+         // the entry stays alive until the backend restores it: nothing keeps between here and this stream's own pass
+-        if (r.images.len == 0) if (h.cache) |store| if (store.lookup(h.gpa, r.prompt, r.history_len, r.shared_prefixes, r.chunks)) |l| {
++        if (r.images.len > 0 and h.cache != null) job.key = imageKey(h.gpa, r) catch &.{};
++        if (r.images.len == 0 or job.key.len > 0) if (h.cache) |store| if (store.lookup(h.gpa, job.cacheKey(), r.history_len, r.shared_prefixes, r.chunks)) |l| {
+             job.entry = l.entry;
+             job.kept0 = store.counts.kept;
+             job.marks = l.marks;
+@@ -433,6 +443,8 @@ pub const LaneHost = struct {
+         job.entry = null; // nothing was restored: the store keeps the entry for the next lookup
+         h.gpa.free(job.marks);
+         job.marks = &.{};
++        if (job.key.len > 0) h.gpa.free(job.key);
++        job.key = &.{};
+         job.stream.deinit(h.gpa);
+         job.proposer.deinit();
+         job.started = false;
+@@ -641,3 +653,17 @@ test "a lane host serves the core's own tokens, in order, and cancels between ro
+ }
+ 
+ test { _ = @import("lane_host_test.zig"); }
++
++/// The prompt cache's key for a request with images: its tokens, each image span's positions holding tokens made from
++/// a hash of that image's prepared bytes (all at or above 2^31, past any vocabulary), so a later turn that carries the
++/// same images resumes its kept state and a different image at the same place never does.
++fn imageKey(gpa: Allocator, r: *const Request) ![]u32 {
++    const key = try gpa.dupe(u32, r.prompt);
++    errdefer gpa.free(key);
++    for (r.images) |img| {
++        if (@as(usize, img.at) + img.tokens > key.len) return error.BadImageSpan;
++        const h = std.hash.Wyhash.hash(0x5eed1a6e, img.bytes);
++        for (key[img.at..][0..img.tokens], 0..) |*t, i| t.* = 0x8000_0000 | @as(u32, @truncate((h +% @as(u64, i) *% 0x9E3779B97F4A7C15) >> 33));
++    }
++    return key;
++}
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index c55995d..dadcd95 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -371,8 +371,8 @@ pub const Lanes = struct {
+         var moved = false;
+         if (s.reuse.saved) |p| {
+             const sn: *Snap = @ptrCast(@alignCast(p));
+-            // (a kept state knows no images: a prompt with them runs whole and keeps nothing)
+-            if (s.images.len == 0 and self.usable(sn, len)) {
++            // a kept state of a prompt with images is keyed by the images' bytes too (lane_host imageKey)
++            if (self.usable(sn, len)) {
+                 kept = sn;
+                 moved = sn.base + size > m.pool_cap or clashes(taken[0..nt], sn.base, sn.base + size);
+             } else s.reuse_failed = true;
+@@ -390,6 +390,8 @@ pub const Lanes = struct {
+             _ = self.streams.remove(s);
+             self.used[slot] = false;
+         }
++        // an image span wholly before the resume point is in the kept state's caches: no tower, no rows
++        const resume_at: usize = if (kept) |sn| sn.at else 0;
+         const seq = &self.seqs[slot];
+         try seq.resize(gpa, len);
+         for (seq.items, ids) |*q, id| q.* = @intCast(id);
+@@ -409,6 +411,7 @@ pub const Lanes = struct {
+                     if (q.* != @as(i64, image_id)) return error.BadImageSpan;
+                     q.* = -1;
+                 }
++                if (@as(usize, img.at) + img.tokens <= resume_at) continue;
+                 if (img.rows) {
+                     if (img.bytes.len != img.tokens * row_bytes) return error.BadImageRows;
+                     try rows.appendSlice(gpa, img.bytes);
+@@ -484,7 +487,7 @@ pub const Lanes = struct {
+             }
+             head = try m.fillChunk(seq.items[0 .. start + n], start, n, replay);
+             start += n;
+-            if (s.images.len == 0) if (s.reuse.hook) |k| if (start < len and start <= replay and (start == last_end or markEnds(s.reuse.marks, start))) k.at(k.ptr, s, @intCast(start));
++            if (s.reuse.hook) |k| if (start < len and start <= replay and (start == last_end or markEnds(s.reuse.marks, start))) k.at(k.ptr, s, @intCast(start));
+         }
+         if (!head) return error.NoPromptLogits;
+         const logits = try m.promptLogitsHost();
+-- 
+2.49.0
+

@@ -1,0 +1,149 @@
+From 1520d33c0b59ed5f6285d4edaed52ff58abe3ec4 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 16:06:54 +0000
+Subject: [PATCH 4/4] dsv41: optional adaptive top-k for decode windows
+ (TF_DS_TOPK_TAU, off by default)
+
+---
+ zig/kernels/cuda/dsv41_ops.cu     | 40 +++++++++++++++++++++++++++++++
+ zig/src/families/dsv41/model.zig  |  4 ++++
+ zig/src/families/dsv41/ops.zig    | 16 +++++++++++++
+ zig/src/families/dsv41/prompt.zig |  5 ++++
+ zig/src/families/dsv41/round.zig  |  1 +
+ 5 files changed, 66 insertions(+)
+
+diff --git a/zig/kernels/cuda/dsv41_ops.cu b/zig/kernels/cuda/dsv41_ops.cu
+index 8503b89..fab1f66 100644
+--- a/zig/kernels/cuda/dsv41_ops.cu
++++ b/zig/kernels/cuda/dsv41_ops.cu
+@@ -511,3 +511,43 @@ extern "C" __global__ void tf_ds_vspan_kernel(const unsigned char* types, const
+         out[i] = ty == 1 ? rows[(long long)row_of[t] * dim + c] : ty == 0 ? start[c] : ty == 2 ? newline[c] : end[c];
+     }
+ }
++
++// Adaptive top-k for the routed experts of a decode window (TF_DS_TOPK_TAU). Each row's routed slots (0 .. k-1; the
++// shared expert sits in slot `slots - 1`) whose weight is below tau x the row's largest routed weight are not routed
++// (pick -1: the EXL3 decode path reads no weights for them), keeping at least kmin slots (the heaviest). With renorm
++// the kept routed weights are scaled so their sum is the row's routed sum before. One thread a row: a row's result
++// depends on its own weights alone, so drafted == serial still holds.
++extern "C" __global__ void tf_ds_route_trim_kernel(int* pick, float* wts, int rows, int slots, int k, float tau, int kmin,
++                                                   int renorm) {
++    const int r = blockIdx.x * blockDim.x + threadIdx.x;
++    if (r >= rows) return;
++    int* p = pick + (size_t)r * slots;
++    float* w = wts + (size_t)r * slots;
++    float mx = 0.f, sum = 0.f;
++    for (int q = 0; q < k; ++q) {
++        if (p[q] < 0) continue;
++        mx = fmaxf(mx, w[q]);
++        sum += w[q];
++    }
++    if (mx <= 0.f) return;
++    int kept = 0;
++    for (int q = 0; q < k; ++q) kept += p[q] >= 0;
++    while (kept > kmin) {
++        int lo = -1;
++        for (int q = 0; q < k; ++q)
++            if (p[q] >= 0 && (lo < 0 || w[q] < w[lo])) lo = q;
++        if (lo < 0 || w[lo] >= tau * mx) break;
++        p[lo] = -1;
++        --kept;
++    }
++    if (renorm) {
++        float left = 0.f;
++        for (int q = 0; q < k; ++q)
++            if (p[q] >= 0) left += w[q];
++        const float s = left > 0.f ? sum / left : 1.f;
++        for (int q = 0; q < k; ++q) w[q] = p[q] >= 0 ? w[q] * s : 0.f;
++    } else {
++        for (int q = 0; q < k; ++q)
++            if (p[q] < 0) w[q] = 0.f;
++    }
++}
+diff --git a/zig/src/families/dsv41/model.zig b/zig/src/families/dsv41/model.zig
+index 0d4ad62..a4718cc 100644
+--- a/zig/src/families/dsv41/model.zig
++++ b/zig/src/families/dsv41/model.zig
+@@ -274,6 +274,10 @@ pub const Model = struct {
+             }
+         }
+         m.eng = .{ .d = d, .s = m.stream, .t = .{ .set = &m.set, .stream = m.stream }, .blas = undefined, .comm = &m.comm, .pf = &m.pf, .lin = &m.lg, .ex = &m.exk, .ops = &m.ops, .exact = &m.ex, .c = c, .w = &m.w, .world = sp.world, .plain = rope, .compressed = rope_c, .ring = m.ring, .two = if (m.two) |*t| t else null };
++        if (std.c.getenv("TF_DS_TOPK_TAU")) |v| m.eng.topk_tau = std.fmt.parseFloat(f32, std.mem.span(v)) catch 0;
++        if (std.c.getenv("TF_DS_TOPK_MIN")) |v| m.eng.topk_min = std.fmt.parseInt(u32, std.mem.span(v), 10) catch 4;
++        if (std.c.getenv("TF_DS_TOPK_RENORM")) |v| m.eng.topk_renorm = !std.mem.eql(u8, std.mem.span(v), "0");
++        if (m.eng.topk_tau > 0) std.log.info("adaptive top-k in decode: tau {d}, at least {d} experts, renorm {}", .{ m.eng.topk_tau, m.eng.topk_min, m.eng.topk_renorm });
+         m.eng.round_rows = o.round_rows;
+         m.ch = try prompt.Chunk.init(&m.eng, &m.arena, chunk_rows, o.pool);
+         m.caches = try prompt.Caches.init(&m.eng, &m.arena, o.pool, m.streams);
+diff --git a/zig/src/families/dsv41/ops.zig b/zig/src/families/dsv41/ops.zig
+index a82baee..f356188 100644
+--- a/zig/src/families/dsv41/ops.zig
++++ b/zig/src/families/dsv41/ops.zig
+@@ -37,6 +37,7 @@ pub const Ops = struct {
+     copy16: cuda.Function,
+     argmax_rows: cuda.Function,
+     gpu_clock: cuda.Function,
++    route_trim: cuda.Function,
+ 
+     /// The three images (cuda.kernels.torch_pointwise, torch_movement and dsv41_ops, or the fatbins' bytes).
+     pub fn load(d: *const cuda.Driver, pointwise: []const u8, movement: []const u8, family: []const u8) !Ops {
+@@ -68,6 +69,7 @@ pub const Ops = struct {
+             .copy16 = try fm.function("tf_ds_copy_rows16_kernel"),
+             .argmax_rows = try fm.function("tf_ds_argmax_rows_kernel"),
+             .gpu_clock = try fm.function("tf_ds_clock_kernel"),
++            .route_trim = try fm.function("tf_ds_route_trim_kernel"),
+         };
+     }
+ 
+@@ -302,6 +304,20 @@ pub const Ops = struct {
+         try go(o.gpu_clock, s, 1, 32, &a);
+     }
+ 
++    /// Adaptive top-k (tf_ds_route_trim_kernel): routed slots under tau x the row's top weight unrouted.
++    pub fn routeTrim(o: *const Ops, s: cuda.Stream, pick: u64, wts: u64, rows: usize, slots: usize, k: usize, tau: f32, kmin: u32, renorm: bool) !void {
++        var a: cuda.Args = .{};
++        a.add(pick);
++        a.add(wts);
++        a.add(@as(c_int, @intCast(rows)));
++        a.add(@as(c_int, @intCast(slots)));
++        a.add(@as(c_int, @intCast(k)));
++        a.add(tau);
++        a.add(@as(c_int, @intCast(kmin)));
++        a.add(@as(c_int, @intFromBool(renorm)));
++        try go(o.route_trim, s, (rows + 63) / 64, 64, &a);
++    }
++
+     /// dst row i = src row idx[i] (int64 indices, rows of `bytes` bytes); an index outside [0, src_rows) sets the
+     /// caller's zeroed uint32 flag `invalid` and leaves that row as it was.
+     pub fn gatherRows(o: *const Ops, s: cuda.Stream, src: u64, src_rows: usize, idx: u64, dst: u64, bytes: usize, rows: usize, invalid: u64) !void {
+diff --git a/zig/src/families/dsv41/prompt.zig b/zig/src/families/dsv41/prompt.zig
+index 9cf2a61..7d73161 100644
+--- a/zig/src/families/dsv41/prompt.zig
++++ b/zig/src/families/dsv41/prompt.zig
+@@ -125,6 +125,11 @@ pub const Engine = struct {
+     round_rows: usize = 16, // a concurrent round's rows at most (TF_DS_ROUND_ROWS; round.max_rows at most)
+     two: ?*const prompt2d.Two = null, // a node of the four-node 2D split (prompt2d.zig); `world` stays TP2's
+     ring: ?*rdma.Ring = null, // TP2: the decode-size all-gathers over the RDMA ring (the served lane's), else NCCL
++    // adaptive top-k in decode windows (TF_DS_TOPK_TAU > 0: routed slots under tau x the row's top weight dropped, at
++    // least TF_DS_TOPK_MIN kept; TF_DS_TOPK_RENORM=0 leaves the kept weights as they were). Off by default.
++    topk_tau: f32 = 0,
++    topk_min: u32 = 4,
++    topk_renorm: bool = true,
+ 
+     /// A decode-size all-gather of `count` fp32 a rank into `dst`, rank after rank: the RDMA ring when the engine has
+     /// one and the slice fits a slot (whole float4s), else NCCL. The same bytes either way.
+diff --git a/zig/src/families/dsv41/round.zig b/zig/src/families/dsv41/round.zig
+index 607b843..f48c8fc 100644
+--- a/zig/src/families/dsv41/round.zig
++++ b/zig/src/families/dsv41/round.zig
+@@ -737,6 +737,7 @@ fn moe(e: *const Engine, rd: *Round, ch: *const Chunk, li: usize) !void {
+     const sl = e.slots();
+     const kc = try tri_norm.rowmmGate(e.t, rd.x, c.hidden, lay.gate_w, rd.gl, R, c.hidden, c.experts);
+     try tri_norm.route(e.t, rd.gl, kc, lay.gate_b, c.top_k, c.routed_scaling, lay.experts.count - 1, rd.pick, rd.mw, R, c.experts, sl);
++    if (e.topk_tau > 0) try e.ops.routeTrim(e.s, rd.pick, rd.mw, R, sl, c.top_k, e.topk_tau, e.topk_min, e.topk_renorm);
+     try rd.mark(e, .m_rt);
+     if (e.two) |tw| {
+         // 2D (round2d.experts, the profile's marks between): gate / up, the intermediate's exchange, down
+-- 
+2.49.0
+

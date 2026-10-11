@@ -1,0 +1,45 @@
+From 9bec017b299d454ee409a5e23e873a19d51c7476 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 16:06:53 +0000
+Subject: [PATCH 3/4] dsv41: tf-dsv41-lanes takes a per-request fix_k and
+ prints each request's round costs
+
+---
+ zig/src/families/dsv41/lanes_main.zig | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/zig/src/families/dsv41/lanes_main.zig b/zig/src/families/dsv41/lanes_main.zig
+index cb52f74..de036a3 100644
+--- a/zig/src/families/dsv41/lanes_main.zig
++++ b/zig/src/families/dsv41/lanes_main.zig
+@@ -25,6 +25,7 @@ const Request = struct {
+     top_p: f64 = 0.95,
+     expect_sha: ?[]const u8 = null,
+     images: []const ImageRows = &.{}, // a vision request: its spans' rows ready (zrec_v3req.py from a recording)
++    fix_k: ?usize = null, // this request's rounds verify exactly K drafts (--parallel 1: a round-cost table by rows)
+ };
+ 
+ /// An image span of a request's prompt and its rows: bf16 [tokens, hidden] from row `row` of `rows_file`.
+@@ -203,6 +204,7 @@ pub fn main(init: std.process.Init) !u8 {
+         while (admitted < reqs.len and core.activeCount() < par) {
+             const r = &reqs[admitted];
+             const j = &jobs[admitted];
++            if (r.fix_k) |k| ln.fix_k = k;
+             j.* = .{ .req = r, .index = admitted, .proposer = try lanes.SuffixLookup.init(gpa, .{ .min_match = 4 }), .stream = undefined, .began = std.Io.Timestamp.now(io, .awake) };
+             j.stream = try lanes.Stream.init(gpa, .{
+                 .id = r.name,
+@@ -243,6 +245,11 @@ pub fn main(init: std.process.Init) !u8 {
+             try w.print("{{\"rank\": 0, \"request\": {d}, \"name\": \"{s}\", \"tokens\": {d}, \"reason\": \"{s}\", \"token_sha\": \"{s}\", \"expect_sha\": \"{s}\", \"equal\": {}, \"rounds\": {d}, \"drafted\": {d}, \"accepted\": {d}, \"min_rows\": {d}, \"seconds\": {d:.2}, \"reply\": [", .{ j.index, j.req.name, reply.len, j.stream.reason.name(), sha, j.req.expect_sha orelse "", equal, j.stream.rounds, j.stream.drafted, j.stream.accepted, j.stream.min_rows, seconds(j.began, io) });
+             for (reply, 0..) |t, k| try w.print("{s}{d}", .{ if (k == 0) "" else ", ", t });
+             try w.print("]}}\n", .{});
++            if (ln.prof) |*p| { // this request's round costs (its rounds alone with --parallel 1), then a fresh sum
++                const nr: f64 = @floatFromInt(@max(p.rounds, 1));
++                try w.print("{{\"rank\": 0, \"request\": {d}, \"round_cost\": {{\"rounds\": {d}, \"rows_a_round\": {d:.3}, \"forward_ms\": {d:.3}, \"enqueue_ms\": {d:.3}, \"pass_ms\": {d:.3}, \"absorb_ms\": {d:.3}, \"logits_ms\": {d:.3}, \"sample_ms\": {d:.3}}}}}\n", .{ j.index, p.rounds, @as(f64, @floatFromInt(p.rows)) / nr, @as(f64, @floatFromInt(p.forward)) / nr / 1e6, @as(f64, @floatFromInt(p.enqueue)) / nr / 1e6, @as(f64, @floatFromInt(p.pass)) / @as(f64, @floatFromInt(@max(p.passes, 1))) / 1e6, @as(f64, @floatFromInt(p.absorb)) / nr / 1e6, @as(f64, @floatFromInt(p.logits)) / nr / 1e6, @as(f64, @floatFromInt(p.sample)) / nr / 1e6 });
++                p.* = .{};
++            }
+             try w.flush();
+             j.stream.deinit(gpa);
+             j.proposer.deinit();
+-- 
+2.49.0
+

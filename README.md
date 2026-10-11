@@ -59,6 +59,20 @@ GID by itself (`show_gids`: the RoCE v2 row with your IPv4 address). On both ran
 TF_RDMA_DEVICES=rocep1s0f1,roceP2p1s0f1   --rdma rocep1s0f1,roceP2p1s0f1
 ```
 
+**Context length** (harness, patches 0001–0007, one stream, MTU 1500, greedy, 256 tokens after a long document;
+`results/ctx_sweep.jsonl`):
+
+| Prompt | Cold prefill | Prefill rate | Decode | Tokens a round | Forward a round |
+|---|---:|---:|---:|---:|---:|
+| 4K | 2.0 s | 2,010 tok/s | 72 tok/s | 2.98 | 37.0 ms (4.0 rows) |
+| 32K | 13.0 s | 2,520 tok/s | 95 tok/s | 4.13 | 39.5 ms (5.0 rows) |
+| 128K | 54.4 s | 2,410 tok/s | 69 tok/s | 2.88 | 37.3 ms (3.9 rows) |
+| 512K | 258 s | 2,030 tok/s | 60 tok/s | 2.69 | 39.9 ms (4.1 rows) |
+
+Decode speed follows the text (tokens a round), not the context: a round costs the same at 4K and 128K, and ~7 % more
+at 512K (sparse attention). Prefill goes from 0.40 ms a token below 32K to 0.52 ms between 128K and 512K. At 128K with
+the served sampling (T=1, top-p 0.95, top-k 20): 70 tok/s.
+
 **Prefill** (`tf-dsv41-lanes` harness, MTU 9000, one request at a time). Patch 0005, same first tokens:
 
 | Prompt | 2,048-row chunks | 4,096-row chunks | Gain |

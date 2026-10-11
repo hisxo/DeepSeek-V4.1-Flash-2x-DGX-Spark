@@ -1,7 +1,7 @@
 From d4a180c7faa1777f19d6243b3b2cfc75c731b04c Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 16:06:53 +0000
-Subject: [PATCH 1/5] dsv41: the prompt cache keys a request with images by the
+Subject: [PATCH 1/6] dsv41: the prompt cache keys a request with images by the
  images' bytes, so its later turns resume
 
 ---

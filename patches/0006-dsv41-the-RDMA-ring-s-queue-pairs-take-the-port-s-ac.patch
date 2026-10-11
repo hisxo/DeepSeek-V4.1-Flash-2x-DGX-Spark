@@ -1,0 +1,31 @@
+From c7e8d8aafc21d3b7992aa347fd1e9fbb7b41c51b Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 18:12:12 +0000
+Subject: [PATCH 6/6] dsv41: the RDMA ring's queue pairs take the port's active
+ MTU (at most 4096)
+
+The ring's QPs were created with a fixed 4,096-byte path MTU. On a RoCE link at
+Ethernet MTU 1500 (active MTU 1024) every gather failed, so TP2 lanes fell back
+to NCCL for the decode all-gathers. With the port's active MTU the ring runs at
+MTU 1500 as fast as at MTU 9000 (decode forward within 2 %, same tokens).
+---
+ zig/src/families/dsv41/rdma.zig | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/zig/src/families/dsv41/rdma.zig b/zig/src/families/dsv41/rdma.zig
+index dfc06a9..dfae3f5 100644
+--- a/zig/src/families/dsv41/rdma.zig
++++ b/zig/src/families/dsv41/rdma.zig
+@@ -280,7 +280,8 @@ pub const Ring = struct {
+             peer.* = .{ .qpn = ri.qpn, .psn = ri.psn, .rkey = ri.rkey, .gid = ri.gid, .recv = ri.recv };
+             for (r.nics[0..r.nd], 0..) |n, d| {
+                 const qp = n.qps[p].?;
+-                var a: vabi.QpAttr = .{ .qp_state = vabi.qps_rtr, .path_mtu = mtu_4096, .dest_qp_num = ri.qpn[d], .rq_psn = ri.psn[d], .max_dest_rd_atomic = 1, .min_rnr_timer = 12 };
++                const port_mtu: c_int = if (r.v.port(@ptrCast(n.ctx), 1)) |pa| pa.active_mtu else |_| mtu_4096;
++                var a: vabi.QpAttr = .{ .qp_state = vabi.qps_rtr, .path_mtu = @min(mtu_4096, port_mtu), .dest_qp_num = ri.qpn[d], .rq_psn = ri.psn[d], .max_dest_rd_atomic = 1, .min_rnr_timer = 12 };
+                 a.ah_attr = .{ .grh = .{ .dgid = .{ .raw = ri.gid[d] }, .sgid_index = r.s.gid_index, .hop_limit = 64 }, .is_global = 1, .port_num = 1 };
+                 if (api.ibv_modify_qp(qp, &a, m.state | m.av | m.path_mtu | m.dest_qpn | m.rq_psn | m.max_dest_rd_atomic | m.min_rnr_timer) != 0) return error.VerbsFailed;
+                 a = .{ .qp_state = vabi.qps_rts, .timeout = 14, .retry_cnt = 7, .rnr_retry = 7, .sq_psn = n.psns[p], .max_rd_atomic = 1 };
+-- 
+2.49.0
+

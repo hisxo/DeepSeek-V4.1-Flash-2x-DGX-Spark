@@ -30,6 +30,7 @@ Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
 | 0003 | `tf-dsv41-lanes`: per-request `fix_k` and per-request round costs (a measurement tool). | tool |
 | 0004 | Adaptive top-k for the routed experts of decode windows. Experimental: quality not validated yet. | off (`TF_DS_TOPK_TAU`) |
 | 0005 | Prompt chunks of 4,096 rows instead of 2,048. ~2.5 GB more arena per rank. | on |
+| 0006 | The RDMA ring's queue pairs take the port's active MTU (at most 4,096). The ring then works at Ethernet MTU 1500. | on with `--rdma` |
 
 ## Results
 
@@ -46,8 +47,9 @@ decode all-gathers go over the engine's RDMA ring instead of NCCL. No code chang
 One gather of 1 row (20 KB) takes 9 µs on the ring against 21 µs with NCCL; a decode round does 80 of them. Engine
 harness rows (per-round costs, token hashes): `results/decode_nccl_vs_rdma.jsonl`.
 
-The ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and every
-gather fails, which is why the stock setup runs NCCL. Set MTU 9000 on both RoCE ports of both nodes, then:
+Stock, the ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and
+every gather fails, which is why the stock setup runs NCCL. With patch 0006 the ring runs at MTU 1500 within 1 % of
+MTU 9000, same tokens (`results/decode_mtu1500_vs_9000.jsonl`). No MTU change needed. On both ranks:
 
 ```
 # rank 0 (tensorfold-native serve)      # rank 1 (tf-dsv41-lanes)
@@ -110,7 +112,7 @@ These measurements guide the next patches.
 ## Tried, no gain
 
 - NCCL protocols (LL, LL128, auto) and tuning (channels, QPs per connection, GPUDirect level, buffer size).
-- MTU 9000 with NCCL gathers (decode unchanged; it only enables the RDMA ring).
+- MTU 9000: decode unchanged with NCCL, and with patch 0006 the RDMA ring does not need it either.
 - The RDMA ring for the large prefill gathers: 2.97 ms for 42 MB against 2.25 ms with NCCL.
 - Prompt MoE kernels over 128 rows a program (bit-exact, written for this): 15-30 % slower, since most experts get
   64 rows or fewer per chunk.

@@ -1,7 +1,7 @@
 From 48e30a3744a862d4fb2da25857844da0af3c87ad Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 16:06:53 +0000
-Subject: [PATCH 2/5] dsv41: kept prompt states spill to NVMe when the pool
+Subject: [PATCH 2/6] dsv41: kept prompt states spill to NVMe when the pool
  needs their rows (TF_DS_SPILL_DIR), and are read back on resume
 
 ---

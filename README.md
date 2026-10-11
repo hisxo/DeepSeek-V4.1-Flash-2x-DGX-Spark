@@ -31,11 +31,13 @@ Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
 | 0004 | Adaptive top-k for the routed experts of decode windows. Experimental: quality not validated yet. | off (`TF_DS_TOPK_TAU`) |
 | 0005 | Prompt chunks of 4,096 rows instead of 2,048. ~2.5 GB more arena per rank. | on |
 | 0006 | The RDMA ring's queue pairs take the port's active MTU (at most 4,096). The ring then works at Ethernet MTU 1500. | on with `--rdma` |
+| 0007 | The RDMA ring picks the port's RoCE v2 IPv4 GID. Stock code uses index 5, which is empty on a usual Spark link (ours: 3), so the ring failed with `VerbsFailed`. | on with `--rdma` (`TF_DS_RDMA_GID` overrides) |
 
 ## Results
 
 **Decode** (`tensorfold-native serve`, same settings as production, greedy, 384 tokens, median of 3; MTU 9000). The
-decode all-gathers go over the engine's RDMA ring instead of NCCL. No code change, only settings.
+decode all-gathers go over the engine's RDMA ring instead of NCCL (patches 0006–0007 make the ring connect on a stock
+Spark link).
 
 | Prompt | NCCL | RDMA ring | Gain | Same text |
 |---|---:|---:|---:|:---:|
@@ -49,7 +51,8 @@ harness rows (per-round costs, token hashes): `results/decode_nccl_vs_rdma.jsonl
 
 Stock, the ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and
 every gather fails, which is why the stock setup runs NCCL. With patch 0006 the ring runs at MTU 1500 within 1 % of
-MTU 9000, same tokens (`results/decode_mtu1500_vs_9000.jsonl`). No MTU change needed. On both ranks:
+MTU 9000, same tokens (`results/decode_mtu1500_vs_9000.jsonl`). No MTU change needed. Patch 0007 then finds the right
+GID by itself (`show_gids`: the RoCE v2 row with your IPv4 address). On both ranks:
 
 ```
 # rank 0 (tensorfold-native serve)      # rank 1 (tf-dsv41-lanes)

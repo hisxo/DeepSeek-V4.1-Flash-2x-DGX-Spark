@@ -1,0 +1,79 @@
+From 20aa971671125ad794946570cffc2bf731c96e51 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 19:00:34 +0000
+Subject: [PATCH 7/7] dsv41: the RDMA ring picks a RoCE v2 IPv4 GID on each
+ device (TF_DS_RDMA_GID overrides)
+
+The ring's queue pairs sent from GID index 5. On a usual DGX Spark link the RoCE v2
+GID of the port's IPv4 address is at index 3 and index 5 is empty, so the ring failed
+to connect (VerbsFailed) and TP2 lanes kept NCCL for the decode gathers. Each device
+now keeps index 5 when it holds a RoCE v2 IPv4 GID, else takes the port's first such
+GID (the one NCCL picks). TF_DS_RDMA_GID sets the index by hand.
+---
+ zig/src/families/dsv41/rdma.zig | 29 ++++++++++++++++++++++++++---
+ 1 file changed, 26 insertions(+), 3 deletions(-)
+
+diff --git a/zig/src/families/dsv41/rdma.zig b/zig/src/families/dsv41/rdma.zig
+index dfae3f5..5cb059f 100644
+--- a/zig/src/families/dsv41/rdma.zig
++++ b/zig/src/families/dsv41/rdma.zig
+@@ -116,6 +116,7 @@ const Nic = struct {
+     mr_send: *vabi.Mr,
+     mr_recv: *vabi.Mr,
+     gid: [16]u8,
++    gid_index: u8, // the GID this device's QPs send from (Ring.pickGid)
+     qps: [max_ranks]?*vabi.Qp = @splat(null),
+     psns: [max_ranks]u32 = @splat(0),
+ };
+@@ -198,6 +199,27 @@ pub const Ring = struct {
+         return r;
+     }
+ 
++    /// The GID index the ring sends from on a device: TF_DS_RDMA_GID when set, else the configured one when it holds a
++    /// RoCE v2 GID of an IPv4 address, else the port's first such GID (what NCCL picks), else the configured one.
++    fn pickGid(r: *const Ring, ctx: *vabi.Context) u8 {
++        if (std.c.getenv("TF_DS_RDMA_GID")) |v| return std.fmt.parseInt(u8, std.mem.span(v), 10) catch r.s.gid_index;
++        if (r.roceV2Ipv4(ctx, r.s.gid_index)) return r.s.gid_index;
++        const p = r.v.port(ctx, 1) catch return r.s.gid_index;
++        const n: u32 = @intCast(@max(0, @min(p.gid_tbl_len, 256)));
++        var i: u32 = 0;
++        while (i < n) : (i += 1) if (r.roceV2Ipv4(ctx, i)) return @intCast(i);
++        return r.s.gid_index;
++    }
++
++    /// Whether GID `i` of port 1 is an IPv4 address's (::ffff:a.b.c.d) of type RoCE v2 (when the library tells types).
++    fn roceV2Ipv4(r: *const Ring, ctx: *vabi.Context, i: u32) bool {
++        const g = r.v.gid(ctx, 1, i) catch return false;
++        for (g.raw[0..10]) |b| if (b != 0) return false;
++        if (g.raw[10] != 0xff or g.raw[11] != 0xff) return false;
++        const t = r.v.gidType(ctx, 1, i) orelse return true;
++        return t == 2; // IBV_GID_TYPE_ROCE_V2
++    }
++
+     fn openNic(r: *Ring, name: []const u8) Error!Nic {
+         const api = r.v.api;
+         const ctx = try r.v.openDevice(name);
+@@ -211,8 +233,9 @@ pub const Ring = struct {
+         errdefer _ = api.ibv_dereg_mr(mr_send);
+         const mr_recv = api.ibv_reg_mr(pd, r.recv.mem.ptr, r.recv.mem.len, access) orelse return error.VerbsFailed;
+         errdefer _ = api.ibv_dereg_mr(mr_recv);
+-        const gid = try r.v.gid(ctx, 1, r.s.gid_index);
+-        var nic: Nic = .{ .ctx = ctx, .pd = pd, .cq = cq, .mr_send = mr_send, .mr_recv = mr_recv, .gid = gid.raw };
++        const gi = r.pickGid(ctx);
++        const gid = try r.v.gid(ctx, 1, gi);
++        var nic: Nic = .{ .ctx = ctx, .pd = pd, .cq = cq, .mr_send = mr_send, .mr_recv = mr_recv, .gid = gid.raw, .gid_index = gi };
+         errdefer for (nic.qps) |q| if (q) |qp| {
+             _ = api.ibv_destroy_qp(qp);
+         };
+@@ -282,7 +305,7 @@ pub const Ring = struct {
+                 const qp = n.qps[p].?;
+                 const port_mtu: c_int = if (r.v.port(@ptrCast(n.ctx), 1)) |pa| pa.active_mtu else |_| mtu_4096;
+                 var a: vabi.QpAttr = .{ .qp_state = vabi.qps_rtr, .path_mtu = @min(mtu_4096, port_mtu), .dest_qp_num = ri.qpn[d], .rq_psn = ri.psn[d], .max_dest_rd_atomic = 1, .min_rnr_timer = 12 };
+-                a.ah_attr = .{ .grh = .{ .dgid = .{ .raw = ri.gid[d] }, .sgid_index = r.s.gid_index, .hop_limit = 64 }, .is_global = 1, .port_num = 1 };
++                a.ah_attr = .{ .grh = .{ .dgid = .{ .raw = ri.gid[d] }, .sgid_index = n.gid_index, .hop_limit = 64 }, .is_global = 1, .port_num = 1 };
+                 if (api.ibv_modify_qp(qp, &a, m.state | m.av | m.path_mtu | m.dest_qpn | m.rq_psn | m.max_dest_rd_atomic | m.min_rnr_timer) != 0) return error.VerbsFailed;
+                 a = .{ .qp_state = vabi.qps_rts, .timeout = 14, .retry_cnt = 7, .rnr_retry = 7, .sq_psn = n.psns[p], .max_rd_atomic = 1 };
+                 if (api.ibv_modify_qp(qp, &a, m.state | m.timeout | m.retry_cnt | m.rnr_retry | m.sq_psn | m.max_qp_rd_atomic) != 0) return error.VerbsFailed;
+-- 
+2.49.0
+

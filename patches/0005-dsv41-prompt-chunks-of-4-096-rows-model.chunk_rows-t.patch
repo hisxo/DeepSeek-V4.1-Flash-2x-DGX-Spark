@@ -1,7 +1,7 @@
 From 68ffd8892a062e668dd3d9d64082b15177667fa5 Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 17:44:06 +0000
-Subject: [PATCH 5/6] dsv41: prompt chunks of 4,096 rows (model.chunk_rows, the
+Subject: [PATCH 5/7] dsv41: prompt chunks of 4,096 rows (model.chunk_rows, the
  server's prompt_rows)
 
 Fewer and larger launches a prompt: per token, the MoE takes 7 % less, the

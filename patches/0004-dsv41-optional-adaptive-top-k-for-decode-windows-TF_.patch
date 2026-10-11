@@ -1,7 +1,7 @@
 From 1520d33c0b59ed5f6285d4edaed52ff58abe3ec4 Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 16:06:54 +0000
-Subject: [PATCH 4/6] dsv41: optional adaptive top-k for decode windows
+Subject: [PATCH 4/7] dsv41: optional adaptive top-k for decode windows
  (TF_DS_TOPK_TAU, off by default)
 
 ---

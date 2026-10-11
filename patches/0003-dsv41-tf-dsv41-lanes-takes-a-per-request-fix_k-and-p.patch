@@ -1,7 +1,7 @@
 From 9bec017b299d454ee409a5e23e873a19d51c7476 Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 16:06:53 +0000
-Subject: [PATCH 3/6] dsv41: tf-dsv41-lanes takes a per-request fix_k and
+Subject: [PATCH 3/7] dsv41: tf-dsv41-lanes takes a per-request fix_k and
  prints each request's round costs
 
 ---

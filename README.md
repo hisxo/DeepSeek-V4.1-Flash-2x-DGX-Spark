@@ -32,11 +32,29 @@ Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
 
 ## Results
 
-Same two nodes, same weights and settings (`--parallel 4`, greedy, thinking off). Only the engine binary changes.
+**Decode, one stream** (`tf-dsv41-lanes` harness, greedy, 384 tokens, MTU 9000). The decode all-gathers go over
+the engine's RDMA ring instead of NCCL. No code change, only settings.
 
-**Agent replay** (`bench/agent_replay.py`). Three sessions of 72K / 80K / 89K tokens (one carries an image) take 5
-turns each in rotation. Every turn appends the previous reply plus ~2.7K tokens of tool output. The KV pool is
-262,144 positions, so the sessions crowd each other out, as several agents do on the 1M pool.
+| Prompt | NCCL | RDMA ring | Gain | Same tokens |
+|---|---:|---:|---:|:---:|
+| code | 80.5 tok/s | **88.9 tok/s** | +10 % | yes |
+| prose | 55.3 tok/s | **60.6 tok/s** | +9 % | yes |
+| structured | 124.3 tok/s | **133.8 tok/s** | +8 % | yes |
+
+Forward per round: 43.1 → 39.9 ms (code), 32.5 → 29.8 ms (prose). Raw rows: `results/decode_nccl_vs_rdma.jsonl`.
+
+The ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and every
+gather fails, which is why the stock setup runs NCCL. Set MTU 9000 on both RoCE ports of both nodes, then:
+
+```
+# rank 0 (tensorfold-native serve)      # rank 1 (tf-dsv41-lanes)
+TF_RDMA_DEVICES=rocep1s0f1,roceP2p1s0f1   --rdma rocep1s0f1,roceP2p1s0f1
+```
+
+**Agent replay** (`bench/agent_replay.py`, patches 0001–0002, `--parallel 4`, greedy, thinking off; only the engine
+binary changes). Three sessions of 72K / 80K / 89K tokens (one carries an image) take 5 turns each in rotation.
+Every turn appends the previous reply plus ~2.7K tokens of tool output. The KV pool is 262,144 positions, so the
+sessions crowd each other out, as several agents do on the 1M pool.
 
 | | Stock | Patched |
 |---|---:|---:|
@@ -69,7 +87,7 @@ These measurements guide the next patches.
   | Forward, ms | 24.7 | 29.6 | 34.0 | 38.5 | 42.2 | 45.6 |
 
   Add 4.1 ms for the drafter pass. About 16 ms of the 1-row round is weight streaming at DRAM speed and ~5 ms is
-  NCCL all-gathers (80 a round). The decode is bandwidth-bound.
+  NCCL all-gathers (80 a round); the RDMA ring saves ~3 ms of that. The decode is bandwidth-bound.
 - **Prefill chunk** (2,048 rows, 32K prompt): MoE 46 %, attention 25 %, NCCL gathers 14 %, mHC mixes 15 %. That is
   ~2.5× above what the bandwidth and the tensor cores allow.
 
@@ -94,10 +112,10 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 ## Next
 
 Work in progress, in this repository:
-- decode all-gathers: the RDMA ring under CUDA graphs, NCCL protocol;
-- larger prefill chunks and RoCE jumbo frames;
-- compute/communication overlap in prefill;
-- adaptive top-k with quality gates.
+- prefill: 4,096-row chunks; overlap the all-gathers with compute (NCCL tops out at ~19 GB/s on this link);
+- several streams per round, and longer copy windows for code and agent output;
+- tokenizer memoization for long agent sessions;
+- adaptive top-k, only if quality and security-knowledge scores hold.
 
 ## Credits
 

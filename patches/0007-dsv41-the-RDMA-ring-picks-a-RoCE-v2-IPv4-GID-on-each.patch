@@ -1,7 +1,7 @@
 From 20aa971671125ad794946570cffc2bf731c96e51 Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 19:00:34 +0000
-Subject: [PATCH 7/7] dsv41: the RDMA ring picks a RoCE v2 IPv4 GID on each
+Subject: [PATCH 7/9] dsv41: the RDMA ring picks a RoCE v2 IPv4 GID on each
  device (TF_DS_RDMA_GID overrides)
 
 The ring's queue pairs sent from GID index 5. On a usual DGX Spark link the RoCE v2

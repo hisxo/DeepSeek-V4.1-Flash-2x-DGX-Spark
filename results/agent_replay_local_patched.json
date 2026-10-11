@@ -1,0 +1,529 @@
+{
+ "args": {
+  "sessions": 3,
+  "turns": 4,
+  "base_words": 33000,
+  "tool_words": 1200,
+  "max_tokens": 96
+ },
+ "summary": {
+  "turns": 15,
+  "later_turns": 12,
+  "later_ttft_s_mean": 2.1472173730532327,
+  "later_ttft_s_max": 2.6257362365722656,
+  "later_cached_ratio": 0.9574824392318865,
+  "wall_s": 147.93355321884155
+ },
+ "rows": [
+  {
+   "ttft_s": 31.765221118927002,
+   "total_s": 33.30698108673096,
+   "text": "The cache is invalidated in the `cache` handling logic tied to `cache378`, `cache495`, `cache341`, and related cache entries, where stale cached values are cleared or replaced when the associated `model`, `layer`, or `buffer` state changes. In summary, invalidation occurs when a cached result no longer matches the current configuration or input state, causing it to be discarded and recomputed.",
+   "prompt_tokens": 71536,
+   "cached_tokens": 0,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 55.73438077337492,
+     "seconds": 33.130274598,
+     "prefill_seconds": 31.604960043,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 31.749004032,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "6589f05c01c9",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 38,
+     "drafted": 89,
+     "accepted": 48,
+     "acceptance_rate": 0.5393258426966292,
+     "tokens_per_round": 2.263157894736842
+    }
+   },
+   "session": 0,
+   "turn": 0
+  },
+  {
+   "ttft_s": 35.931640625,
+   "total_s": 37.09289240837097,
+   "text": "I can't determine where the cache is invalidated from this data. The source tree you provided is just a flat list of identifier-like tokens (e.g., `cache478`, `index930`, `error946`) with no file paths, directory structure, code, or relationships between them, so there's no way to locate cache-invalidation logic or summarize it.",
+   "prompt_tokens": 80194,
+   "cached_tokens": 0,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 64.79797865892934,
+     "seconds": 36.910595874,
+     "prefill_seconds": 35.768272926,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 35.930195973,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "0e98ce8e1f9e",
+     "min_rows": 1
+    },
+    "speculative": {
+     "rounds": 28,
+     "drafted": 74,
+     "accepted": 47,
+     "acceptance_rate": 0.6351351351351351,
+     "tokens_per_round": 2.6785714285714284
+    }
+   },
+   "session": 1,
+   "turn": 0
+  },
+  {
+   "ttft_s": 40.37595772743225,
+   "total_s": 41.330376625061035,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 89038,
+   "cached_tokens": 0,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 62.94636689056181,
+     "seconds": 41.215407587,
+     "prefill_seconds": 40.27736828,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 40.370832893,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "e92d67964ea2",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 23,
+     "drafted": 56,
+     "accepted": 37,
+     "acceptance_rate": 0.6607142857142857,
+     "tokens_per_round": 2.608695652173913
+    }
+   },
+   "session": 2,
+   "turn": 0
+  },
+  {
+   "ttft_s": 2.6257362365722656,
+   "total_s": 3.8004162311553955,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache378`, `cache495`, `cache341`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 74235,
+   "cached_tokens": 69632,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 73.43702214637686,
+     "seconds": 3.704520081,
+     "prefill_seconds": 2.546703421,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.624330808,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "462b83aa9aa5",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 25,
+     "drafted": 90,
+     "accepted": 61,
+     "acceptance_rate": 0.6777777777777778,
+     "tokens_per_round": 3.44
+    }
+   },
+   "session": 0,
+   "turn": 1
+  },
+  {
+   "ttft_s": 1.8890113830566406,
+   "total_s": 3.2188634872436523,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache681`, `cache645`, `cache495`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or at least grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `",
+   "prompt_tokens": 82882,
+   "cached_tokens": 79872,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 72.45947089900615,
+     "seconds": 3.104350676,
+     "prefill_seconds": 1.792853679,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.886874384,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "eb6332375103",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 31,
+     "drafted": 87,
+     "accepted": 64,
+     "acceptance_rate": 0.735632183908046,
+     "tokens_per_round": 3.096774193548387
+    }
+   },
+   "session": 1,
+   "turn": 1
+  },
+  {
+   "ttft_s": 2.108405351638794,
+   "total_s": 2.7001395225524902,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 91711,
+   "cached_tokens": 88064,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 100.23948861836078,
+     "seconds": 2.681605097,
+     "prefill_seconds": 2.092523904,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.106364069,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "e92d67964ea2",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 11,
+     "drafted": 51,
+     "accepted": 49,
+     "acceptance_rate": 0.9607843137254902,
+     "tokens_per_round": 5.454545454545454
+    }
+   },
+   "session": 2,
+   "turn": 1
+  },
+  {
+   "ttft_s": 1.8326585292816162,
+   "total_s": 2.697472095489502,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache368`, `cache877`, `cache992`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 76934,
+   "cached_tokens": 73728,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 98.53413777221664,
+     "seconds": 2.67792597,
+     "prefill_seconds": 1.814940108,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.831196193,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "ef8781d7d1ca",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 17,
+     "drafted": 78,
+     "accepted": 69,
+     "acceptance_rate": 0.8846153846153846,
+     "tokens_per_round": 5.0588235294117645
+    }
+   },
+   "session": 0,
+   "turn": 2
+  },
+  {
+   "ttft_s": 2.150022268295288,
+   "total_s": 3.093574047088623,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache284`, `cache232`, `cache722`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `cache.clear",
+   "prompt_tokens": 85592,
+   "cached_tokens": 81920,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 101.04173163805119,
+     "seconds": 3.066765149,
+     "prefill_seconds": 2.126061536,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.14807228,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "8149c058d59b",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 19,
+     "drafted": 82,
+     "accepted": 76,
+     "acceptance_rate": 0.926829268292683,
+     "tokens_per_round": 5.052631578947368
+    }
+   },
+   "session": 1,
+   "turn": 2
+  },
+  {
+   "ttft_s": 2.4070234298706055,
+   "total_s": 3.0164361000061035,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 94384,
+   "cached_tokens": 90112,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 97.03609338082597,
+     "seconds": 2.987781434,
+     "prefill_seconds": 2.37915091,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.403775126,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "e92d67964ea2",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 11,
+     "drafted": 52,
+     "accepted": 49,
+     "acceptance_rate": 0.9423076923076923,
+     "tokens_per_round": 5.454545454545454
+    }
+   },
+   "session": 2,
+   "turn": 2
+  },
+  {
+   "ttft_s": 2.1884491443634033,
+   "total_s": 3.071786403656006,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache699`, `cache560`, `cache773`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 79633,
+   "cached_tokens": 75776,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 96.53760234331696,
+     "seconds": 3.045102276,
+     "prefill_seconds": 2.16419832,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.186613784,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "f057b9b12412",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 17,
+     "drafted": 76,
+     "accepted": 69,
+     "acceptance_rate": 0.9078947368421053,
+     "tokens_per_round": 5.0588235294117645
+    }
+   },
+   "session": 0,
+   "turn": 3
+  },
+  {
+   "ttft_s": 2.557063102722168,
+   "total_s": 3.512312650680542,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache589`, `cache445`, `cache237`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `cache.clear",
+   "prompt_tokens": 88302,
+   "cached_tokens": 83968,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 99.90567652685812,
+     "seconds": 3.481853098,
+     "prefill_seconds": 2.530342259,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.555116747,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "63603e0f534f",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 19,
+     "drafted": 83,
+     "accepted": 76,
+     "acceptance_rate": 0.9156626506024096,
+     "tokens_per_round": 5.052631578947368
+    }
+   },
+   "session": 1,
+   "turn": 3
+  },
+  {
+   "ttft_s": 1.7402818202972412,
+   "total_s": 2.343492269515991,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 97057,
+   "cached_tokens": 94208,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 98.12581098072265,
+     "seconds": 2.311128083,
+     "prefill_seconds": 1.709231438,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.736741063,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "e92d67964ea2",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 11,
+     "drafted": 52,
+     "accepted": 49,
+     "acceptance_rate": 0.9423076923076923,
+     "tokens_per_round": 5.454545454545454
+    }
+   },
+   "session": 2,
+   "turn": 3
+  },
+  {
+   "ttft_s": 2.4747068881988525,
+   "total_s": 3.422226667404175,
+   "text": "The cache is invalidated in the cache-handling logic around entries such as `cache259`, `cache315`, `cache492`, and related `cache`/`buffer`/`model` state transitions, where stale cached values are cleared or replaced when the associated configuration or input changes. In short, invalidation happens when a cached result no longer matches the current state, so it is discarded and recomputed.",
+   "prompt_tokens": 82332,
+   "cached_tokens": 77824,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 90.00375364360607,
+     "seconds": 3.393955595,
+     "prefill_seconds": 2.449094346,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.47254749,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "6346a3e97a77",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 18,
+     "drafted": 81,
+     "accepted": 68,
+     "acceptance_rate": 0.8395061728395061,
+     "tokens_per_round": 4.777777777777778
+    }
+   },
+   "session": 0,
+   "turn": 4
+  },
+  {
+   "ttft_s": 1.7959978580474854,
+   "total_s": 2.7198612689971924,
+   "text": "The grep output is still just a flat list of identifier-like tokens (e.g., `cache644`, `cache720`, `cache832`) with no file paths, line numbers, or surrounding code context, so it doesn't reveal where or how the cache is invalidated. To summarize cache invalidation in two sentences, I'd need the actual source files or grep results showing the invalidation call sites (e.g., lines containing `cache.delete`, `cache.clear",
+   "prompt_tokens": 91012,
+   "cached_tokens": 88064,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 103.35856700375233,
+     "seconds": 2.687142943,
+     "prefill_seconds": 1.767462537,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.793904609,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "8047a411e545",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 18,
+     "drafted": 80,
+     "accepted": 77,
+     "acceptance_rate": 0.9625,
+     "tokens_per_round": 5.333333333333333
+    }
+   },
+   "session": 1,
+   "turn": 4
+  },
+  {
+   "ttft_s": 1.9972524642944336,
+   "total_s": 2.606722354888916,
+   "text": "The cache is invalidated in the `cache` module, specifically within the `invalidate` function that is called whenever a `config` or `tensor` value is updated. This function clears the corresponding cache entries by removing them from the cache store, ensuring stale data is not reused.",
+   "prompt_tokens": 99730,
+   "cached_tokens": 96256,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 97.31549114831489,
+     "seconds": 2.575655428,
+     "prefill_seconds": 1.968592244,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.99367486,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "e92d67964ea2",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 11,
+     "drafted": 53,
+     "accepted": 49,
+     "acceptance_rate": 0.9245283018867925,
+     "tokens_per_round": 5.454545454545454
+    }
+   },
+   "session": 2,
+   "turn": 4
+  }
+ ]
+}

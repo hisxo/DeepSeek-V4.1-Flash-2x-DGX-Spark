@@ -1,0 +1,129 @@
+From 8506150e868730a89517ba9ad6375b938850bdc1 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 19:34:11 +0000
+Subject: [PATCH 8/9] tokenizer: memoize each text segment's ids between added
+ tokens
+
+A chat turn renders and tokenizes the whole conversation twice (with and without the
+generation prompt), so a long agent session's earlier messages were tokenized again
+on every turn. The ids of each segment between added tokens are now kept, keyed by
+the tokenizer, the bytes and whether the segment starts the text. Exact: encode
+tokenizes each segment on its own. A cached agent turn of 75K-100K tokens prepares
+in 0.03 s instead of 0.14 s.
+---
+ zig/src/core/tokenizer/tokenizer.zig | 95 +++++++++++++++++++++++++++-
+ 1 file changed, 94 insertions(+), 1 deletion(-)
+
+diff --git a/zig/src/core/tokenizer/tokenizer.zig b/zig/src/core/tokenizer/tokenizer.zig
+index 176d995..2d3a855 100644
+--- a/zig/src/core/tokenizer/tokenizer.zig
++++ b/zig/src/core/tokenizer/tokenizer.zig
+@@ -125,7 +125,20 @@ pub const Tokenizer = struct {
+         }
+         var ids: std.ArrayList(u32) = .empty;
+         for (try t.splitAdded(&ctx, &t.raw, valid)) |seg| {
+-            if (seg.id) |id| try ids.append(ctx.a, id) else if (seg.end > seg.start) try t.encodeText(&ctx, valid[seg.start..seg.end], seg.start == 0, &ids);
++            if (seg.id) |id| {
++                try ids.append(ctx.a, id);
++                continue;
++            }
++            if (seg.end <= seg.start) continue;
++            const piece = valid[seg.start..seg.end];
++            const first = seg.start == 0;
++            if (piece.len >= seg_memo.min_bytes) if (seg_memo.get(@intFromPtr(t), piece, first, ctx.a)) |hit| {
++                try ids.appendSlice(ctx.a, hit);
++                continue;
++            };
++            const before = ids.items.len;
++            try t.encodeText(&ctx, piece, first, &ids);
++            if (piece.len >= seg_memo.min_bytes) seg_memo.put(@intFromPtr(t), piece, first, ids.items[before..]);
+         }
+         return a.dupe(u32, ids.items);
+     }
+@@ -363,3 +376,83 @@ test "without a decoder, decode joins known ids' tokens with spaces" {
+     try std.testing.expectEqualStrings("t1 t4", text);
+     try std.testing.expectEqual(@as(?u32, null), t.unk_id);
+ }
++
++/// Token ids of text segments seen before (process-wide, every tokenizer keyed apart): long chat prompts repeat their
++/// earlier messages turn after turn. At most `cap_bytes` of text and ids are kept; past it the oldest entries go.
++const seg_memo = struct {
++    const min_bytes = 512;
++    const cap_bytes: usize = 512 << 20;
++    const Entry = struct { owner: usize, first: bool, text: []u8, ids: []u32, stamp: u64 };
++    var lock: std.atomic.Value(u32) = .init(0);
++    var map: std.AutoHashMapUnmanaged(u64, Entry) = .empty;
++    var held: usize = 0;
++    var clock: u64 = 0;
++    const gpa = std.heap.c_allocator;
++
++    fn acquire() void {
++        while (lock.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
++    }
++    fn release() void {
++        lock.store(0, .release);
++    }
++    fn key(owner: usize, text: []const u8, first: bool) u64 {
++        var h = std.hash.Wyhash.init(owner);
++        h.update(std.mem.asBytes(&first));
++        h.update(text);
++        return h.final();
++    }
++
++    /// The ids of `text` (copied into `a`), or null.
++    fn get(owner: usize, text: []const u8, first: bool, a: Allocator) ?[]const u32 {
++        const k = key(owner, text, first);
++        acquire();
++        defer release();
++        const e = map.getPtr(k) orelse return null;
++        if (e.owner != owner or e.first != first or !std.mem.eql(u8, e.text, text)) return null;
++        clock += 1;
++        e.stamp = clock;
++        return a.dupe(u32, e.ids) catch null;
++    }
++
++    fn put(owner: usize, text: []const u8, first: bool, ids: []const u32) void {
++        const bytes = text.len + ids.len * 4;
++        if (bytes > cap_bytes / 4) return;
++        const t_copy = gpa.dupe(u8, text) catch return;
++        const i_copy = gpa.dupe(u32, ids) catch {
++            gpa.free(t_copy);
++            return;
++        };
++        const k = key(owner, text, first);
++        acquire();
++        defer release();
++        while (held + bytes > cap_bytes and map.count() > 0) evictOldest();
++        clock += 1;
++        const gop = map.getOrPut(gpa, k) catch {
++            gpa.free(t_copy);
++            gpa.free(i_copy);
++            return;
++        };
++        if (gop.found_existing) {
++            held -= gop.value_ptr.text.len + gop.value_ptr.ids.len * 4;
++            gpa.free(gop.value_ptr.text);
++            gpa.free(gop.value_ptr.ids);
++        }
++        gop.value_ptr.* = .{ .owner = owner, .first = first, .text = t_copy, .ids = i_copy, .stamp = clock };
++        held += bytes;
++    }
++
++    fn evictOldest() void {
++        var oldest: ?u64 = null;
++        var stamp: u64 = std.math.maxInt(u64);
++        var it = map.iterator();
++        while (it.next()) |kv| if (kv.value_ptr.stamp < stamp) {
++            stamp = kv.value_ptr.stamp;
++            oldest = kv.key_ptr.*;
++        };
++        const k = oldest orelse return;
++        const e = map.fetchRemove(k).?.value;
++        held -= e.text.len + e.ids.len * 4;
++        gpa.free(e.text);
++        gpa.free(e.ids);
++    }
++};
+-- 
+2.49.0
+

@@ -27,20 +27,22 @@ def text(rng, words):
 def stream(base, body):
     body = dict(body, stream=True, stream_options={"include_usage": True})
     req = urllib.request.Request(base + "/v1/chat/completions", json.dumps(body).encode(), {"Content-Type": "application/json"})
-    t0 = time.time(); ttft = None; out = []; usage = {}
+    t0 = time.time(); ttft = None; out = []; usage = {}; extra = {}
     with urllib.request.urlopen(req, timeout=3600) as r:
         for raw in r:
             line = raw.decode().strip()
             if not line.startswith("data:") or line == "data: [DONE]": continue
             d = json.loads(line[5:])
             if d.get("usage"): usage = d["usage"]
+            for k, v in d.items():
+                if k not in ("choices", "usage", "id", "object", "created", "model") and v: extra[k] = v
             for c in d.get("choices") or []:
                 piece = (c.get("delta") or {}).get("content")
                 if piece:
                     if ttft is None: ttft = time.time() - t0
                     out.append(piece)
     return {"ttft_s": ttft, "total_s": time.time() - t0, "text": "".join(out), "prompt_tokens": usage.get("prompt_tokens"),
-            "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0}
+            "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0, "server": extra}
 
 def main():
     p = argparse.ArgumentParser()
@@ -63,10 +65,20 @@ def main():
         for s, ss in enumerate(sessions):
             body = {"model": "DeepSeek-V4.1-Flash", "messages": ss["messages"], "max_tokens": a.max_tokens, "temperature": 0,
                     "chat_template_kwargs": {"enable_thinking": False}}
-            r = stream(a.base, body)
+            try:
+                r = stream(a.base, body)
+            except Exception as e:  # an HTTP error or a dropped stream: kept as a failed turn
+                r = {"ttft_s": None, "total_s": 0.0, "text": "", "prompt_tokens": None, "cached_tokens": 0,
+                     "server": {"exception": repr(e), "body": (e.read().decode(errors="replace")[:500] if hasattr(e, "read") else "")}}
             r.update(session=s, turn=turn)
             rows.append(r)
-            print(f"s{s} t{turn} prompt {r['prompt_tokens']:>7} cached {r['cached_tokens']:>7} ttft {r['ttft_s']:7.2f}s total {r['total_s']:7.2f}s", flush=True)
+            rt = r["server"].get("tensorfold") or r["server"].get("runtime") or {}
+            if r["prompt_tokens"] is None or r["ttft_s"] is None:
+                print(f"s{s} t{turn} FAILED: {json.dumps(r['server'])[:600]} text {r['text'][:200]!r}", flush=True)
+                r["ttft_s"] = r["ttft_s"] or r["total_s"]; r["prompt_tokens"] = r["prompt_tokens"] or 0
+            else:
+                print(f"s{s} t{turn} prompt {r['prompt_tokens']:>7} cached {r['cached_tokens']:>7} ttft {r['ttft_s']:7.2f}s total {r['total_s']:7.2f}s"
+                      f" server: prefill {rt.get('prefill_seconds')} ttft {rt.get('time_to_first_token')}", flush=True)
             ss["messages"] = ss["messages"] + [{"role": "assistant", "content": r["text"]},
                                                {"role": "user", "content": "Tool output (grep -n):\n" + text(ss["rng"], a.tool_words) + "\nContinue."}]
     later = [r for r in rows if r["turn"] > 0]

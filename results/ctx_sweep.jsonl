@@ -1,15 +1,15 @@
-{"request": 0, "name": "ctx4k", "prompt_tokens": 4096, "prefill_s": 2.04}
-{"request": 0, "name": "ctx4k", "tokens": 256, "reason": "length", "token_sha": "1ba5aa80786e", "expect_sha": "", "equal": true, "rounds": 86, "drafted": 257, "accepted": 169, "min_rows": 2, "seconds": 5.58}
-{"request": 0, "round_cost": {"rounds": 86, "rows_a_round": 3.988, "forward_ms": 37.02, "enqueue_ms": 1.716, "pass_ms": 3.948, "absorb_ms": 0.281, "logits_ms": 0.07, "sample_ms": 0.0}}
-{"request": 1, "name": "ctx32k", "prompt_tokens": 32768, "prefill_s": 13.0}
-{"request": 1, "name": "ctx32k", "tokens": 256, "reason": "length", "token_sha": "579055fba33b", "expect_sha": "", "equal": true, "rounds": 62, "drafted": 248, "accepted": 193, "min_rows": 2, "seconds": 15.71}
-{"request": 1, "round_cost": {"rounds": 62, "rows_a_round": 5.0, "forward_ms": 39.491, "enqueue_ms": 1.989, "pass_ms": 3.663, "absorb_ms": 0.285, "logits_ms": 0.066, "sample_ms": 0.0}}
-{"request": 2, "name": "ctx128k", "prompt_tokens": 131072, "prefill_s": 54.41}
-{"request": 2, "name": "ctx128k", "tokens": 256, "reason": "length", "token_sha": "d65da06e1430", "expect_sha": "", "equal": true, "rounds": 89, "drafted": 260, "accepted": 166, "min_rows": 2, "seconds": 58.13}
-{"request": 2, "round_cost": {"rounds": 89, "rows_a_round": 3.921, "forward_ms": 37.276, "enqueue_ms": 1.377, "pass_ms": 3.619, "absorb_ms": 0.279, "logits_ms": 0.064, "sample_ms": 0.0}}
-{"request": 3, "name": "ctx512k", "prompt_tokens": 524288, "prefill_s": 257.91}
-{"request": 3, "name": "ctx512k", "tokens": 256, "reason": "length", "token_sha": "f3710540411c", "expect_sha": "", "equal": true, "rounds": 95, "drafted": 292, "accepted": 160, "min_rows": 2, "seconds": 262.16}
-{"request": 3, "round_cost": {"rounds": 95, "rows_a_round": 4.074, "forward_ms": 39.917, "enqueue_ms": 1.441, "pass_ms": 3.691, "absorb_ms": 0.278, "logits_ms": 0.063, "sample_ms": 0.0}}
-{"request": 4, "name": "ctx128k_t1", "prompt_tokens": 131072, "prefill_s": 54.61}
-{"request": 4, "name": "ctx128k_t1", "tokens": 256, "reason": "length", "token_sha": "dda23105efde", "expect_sha": "", "equal": true, "rounds": 89, "drafted": 252, "accepted": 166, "min_rows": 2, "seconds": 58.26}
-{"request": 4, "round_cost": {"rounds": 89, "rows_a_round": 3.831, "forward_ms": 36.314, "enqueue_ms": 0.892, "pass_ms": 3.607, "absorb_ms": 0.276, "logits_ms": 0.046, "sample_ms": 0.251}}
+{"request": 0, "name": "ctx4k", "prompt_tokens": 4096, "prefill_s": 2.01}
+{"request": 0, "name": "ctx4k", "tokens": 256, "reason": "length", "token_sha": "8fbf6e17329e", "expect_sha": "", "equal": true, "rounds": 61, "drafted": 241, "accepted": 194, "min_rows": 2, "seconds": 4.64}
+{"request": 0, "round_cost": {"rounds": 61, "rows_a_round": 4.951, "forward_ms": 39.01, "enqueue_ms": 1.865, "pass_ms": 4.025, "absorb_ms": 0.29, "logits_ms": 0.066, "sample_ms": 0.0}}
+{"request": 1, "name": "ctx32k", "prompt_tokens": 32768, "prefill_s": 13.42}
+{"request": 1, "name": "ctx32k", "tokens": 200, "reason": "stop", "token_sha": "26b4f0f293ee", "expect_sha": "", "equal": true, "rounds": 70, "drafted": 200, "accepted": 130, "min_rows": 2, "seconds": 16.23}
+{"request": 1, "round_cost": {"rounds": 70, "rows_a_round": 3.857, "forward_ms": 36.126, "enqueue_ms": 1.644, "pass_ms": 3.601, "absorb_ms": 0.275, "logits_ms": 0.059, "sample_ms": 0.0}}
+{"request": 2, "name": "ctx128k", "prompt_tokens": 131072, "prefill_s": 57.07}
+{"request": 2, "name": "ctx128k", "tokens": 256, "reason": "length", "token_sha": "c54457030aba", "expect_sha": "", "equal": true, "rounds": 106, "drafted": 259, "accepted": 149, "min_rows": 2, "seconds": 61.27}
+{"request": 2, "round_cost": {"rounds": 106, "rows_a_round": 3.443, "forward_ms": 35.166, "enqueue_ms": 1.553, "pass_ms": 3.596, "absorb_ms": 0.273, "logits_ms": 0.057, "sample_ms": 0.0}}
+{"request": 3, "name": "ctx512k", "prompt_tokens": 524288, "prefill_s": 269.92}
+{"request": 3, "name": "ctx512k", "tokens": 256, "reason": "length", "token_sha": "61019df90bf8", "expect_sha": "", "equal": true, "rounds": 85, "drafted": 254, "accepted": 170, "min_rows": 2, "seconds": 273.66}
+{"request": 3, "round_cost": {"rounds": 85, "rows_a_round": 3.988, "forward_ms": 38.842, "enqueue_ms": 1.721, "pass_ms": 3.608, "absorb_ms": 0.278, "logits_ms": 0.061, "sample_ms": 0.0}}
+{"request": 4, "name": "ctx128k_t1", "prompt_tokens": 131072, "prefill_s": 57.13}
+{"request": 4, "name": "ctx128k_t1", "tokens": 256, "reason": "length", "token_sha": "dce20418558f", "expect_sha": "", "equal": true, "rounds": 97, "drafted": 264, "accepted": 158, "min_rows": 2, "seconds": 61.06}
+{"request": 4, "round_cost": {"rounds": 97, "rows_a_round": 3.722, "forward_ms": 35.835, "enqueue_ms": 0.983, "pass_ms": 3.553, "absorb_ms": 0.273, "logits_ms": 0.042, "sample_ms": 0.244}}

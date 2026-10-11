@@ -1,7 +1,7 @@
 From c7e8d8aafc21d3b7992aa347fd1e9fbb7b41c51b Mon Sep 17 00:00:00 2001
 From: hisxo <16657045+hisxo@users.noreply.github.com>
 Date: Sun, 11 Oct 2026 18:12:12 +0000
-Subject: [PATCH 6/7] dsv41: the RDMA ring's queue pairs take the port's active
+Subject: [PATCH 6/9] dsv41: the RDMA ring's queue pairs take the port's active
  MTU (at most 4096)
 
 The ring's QPs were created with a fixed 4,096-byte path MTU. On a RoCE link at

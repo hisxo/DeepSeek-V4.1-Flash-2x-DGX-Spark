@@ -1,0 +1,92 @@
+{
+ "what": "one decode round of 1 row (fix_k 0), GPU clocks at every phase mark inside the CUDA graphs, us a round and marks a round",
+ "round_cost": {
+  "rounds": 255,
+  "rows_a_round": 1.0,
+  "forward_ms": 22.271,
+  "enqueue_ms": 0.76,
+  "pass_ms": 3.591,
+  "absorb_ms": 0.248,
+  "logits_ms": 0.044,
+  "sample_ms": 0.0
+ },
+ "round_clock_us": {
+  "rounds": 255,
+  "start": [
+   4.0,
+   1.0
+  ],
+  "embed": [
+   5.4,
+   1.0
+  ],
+  "engram": [
+   454.0,
+   2.0
+  ],
+  "mix_attn": [
+   332.2,
+   39.0
+  ],
+  "attn": [
+   2032.7,
+   38.0
+  ],
+  "gather_a": [
+   932.3,
+   38.0
+  ],
+  "mix_ffn": [
+   300.0,
+   38.0
+  ],
+  "moe": [
+   8430.3,
+   38.0
+  ],
+  "gather_m": [
+   850.5,
+   38.0
+  ],
+  "post": [
+   17.3,
+   2.0
+  ],
+  "a_in": [
+   1158.5,
+   39.0
+  ],
+  "a_q": [
+   2360.6,
+   39.0
+  ],
+  "a_idx": [
+   457.2,
+   39.0
+  ],
+  "a_core": [
+   631.2,
+   39.0
+  ],
+  "a_woa": [
+   1545.5,
+   39.0
+  ],
+  "a_x": [
+   65.1,
+   38.0
+  ],
+  "m_rt": [
+   561.4,
+   38.0
+  ],
+  "wait": [
+   81.2,
+   3.0
+  ],
+  "tail": [
+   5.5,
+   2.0
+  ]
+ }
+}

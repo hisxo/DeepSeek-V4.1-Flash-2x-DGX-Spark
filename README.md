@@ -21,7 +21,13 @@ first token.
 
 ## Patches
 
-Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
+Apply on `deepseek-v41-zig` @ `4e80f05`, without 0005 (see its row):
+
+```
+git am patches/000[1-4]*.patch patches/000[6-9]*.patch
+```
+
+With this set, replies are identical to the stock build (15/15 in the agent replay below).
 
 | Patch | Change | Default |
 |---|---|---|
@@ -29,9 +35,11 @@ Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
 | 0002 | When the shared KV pool needs a kept state's rows, each rank writes its half to NVMe (O_DIRECT) instead of dropping it, and reads it back on resume. | `TF_DS_SPILL_DIR=<dir>` on both ranks (cap `TF_DS_SPILL_GIB`, default 48) |
 | 0003 | `tf-dsv41-lanes`: per-request `fix_k` and per-request round costs (a measurement tool). | tool |
 | 0004 | Adaptive top-k for the routed experts of decode windows. Experimental: quality not validated yet. | off (`TF_DS_TOPK_TAU`) |
-| 0005 | Prompt chunks of 4,096 rows instead of 2,048. ~2.5 GB more arena per rank. | on |
+| 0005 | Prompt chunks of 4,096 rows instead of 2,048: cold prompts 5–7 % faster, ~2.5 GB more arena per rank. Not recommended: the prefill sums run in a different order, so replies differ from stock after a few words (0/15 identical; quality not measured), and kept states resume on a 4,096-token grid, so a cached agent turn redoes ~1,000 more tokens (+24 % time to first token). | don't apply |
 | 0006 | The RDMA ring's queue pairs take the port's active MTU (at most 4,096). The ring then works at Ethernet MTU 1500. | on with `--rdma` |
 | 0007 | The RDMA ring picks the port's RoCE v2 IPv4 GID. Stock code uses index 5, which is empty on a usual Spark link (ours: 3), so the ring failed with `VerbsFailed`. | on with `--rdma` (`TF_DS_RDMA_GID` overrides) |
+| 0008 | The tokenizer memoizes each text segment between added tokens (a chat turn tokenizes the whole conversation twice). A cached agent turn of 75K–100K tokens prepares in 0.03 s instead of 0.14 s. Same ids. | on |
+| 0009 | The prompt indexer reads each row block's `vis` from a 16-byte-aligned address. At ~80K tokens of context a block is an odd number of rows (409–419), and the kit's 16-byte loads then hit an 8-byte-aligned view. | on |
 
 ## Results
 
@@ -59,21 +67,22 @@ GID by itself (`show_gids`: the RoCE v2 row with your IPv4 address). On both ran
 TF_RDMA_DEVICES=rocep1s0f1,roceP2p1s0f1   --rdma rocep1s0f1,roceP2p1s0f1
 ```
 
-**Context length** (harness, patches 0001–0007, one stream, MTU 1500, greedy, 256 tokens after a long document;
+**Context length** (harness, the recommended set, one stream, greedy, 256 tokens after a long document;
 `results/ctx_sweep.jsonl`):
 
 | Prompt | Cold prefill | Prefill rate | Decode | Tokens a round | Forward a round |
 |---|---:|---:|---:|---:|---:|
-| 4K | 2.0 s | 2,010 tok/s | 72 tok/s | 2.98 | 37.0 ms (4.0 rows) |
-| 32K | 13.0 s | 2,520 tok/s | 95 tok/s | 4.13 | 39.5 ms (5.0 rows) |
-| 128K | 54.4 s | 2,410 tok/s | 69 tok/s | 2.88 | 37.3 ms (3.9 rows) |
-| 512K | 258 s | 2,030 tok/s | 60 tok/s | 2.69 | 39.9 ms (4.1 rows) |
+| 4K | 2.0 s | 2,040 tok/s | 97 tok/s | 4.20 | 39.0 ms (5.0 rows) |
+| 32K | 13.4 s | 2,440 tok/s | 71 tok/s | 2.86 | 36.1 ms (3.9 rows) |
+| 128K | 57.1 s | 2,300 tok/s | 61 tok/s | 2.42 | 35.2 ms (3.4 rows) |
+| 512K | 270 s | 1,940 tok/s | 68 tok/s | 3.01 | 38.8 ms (4.0 rows) |
 
-Decode speed follows the text (tokens a round), not the context: a round costs the same at 4K and 128K, and ~7 % more
-at 512K (sparse attention). Prefill goes from 0.40 ms a token below 32K to 0.52 ms between 128K and 512K. At 128K with
-the served sampling (T=1, top-p 0.95, top-k 20): 70 tok/s.
+Decode speed follows the text (tokens a round) more than the context: a 4-row round costs 35 ms at 4K, 37.5 ms at
+128K and 39 ms at 512K (sparse attention). Prefill goes from 0.41 ms a token below 32K to 0.54 ms between 128K and
+512K. At 128K with the served sampling (T=1, top-p 0.95, top-k 20): 65 tok/s.
 
-**Prefill** (`tf-dsv41-lanes` harness, MTU 9000, one request at a time). Patch 0005, same first tokens:
+**Prefill** (`tf-dsv41-lanes` harness, MTU 9000, one request at a time). Patch 0005, not recommended: the first token
+is the same, but replies then differ (the prefill sums run in another order):
 
 | Prompt | 2,048-row chunks | 4,096-row chunks | Gain |
 |---|---:|---:|---:|
@@ -83,20 +92,22 @@ the served sampling (T=1, top-p 0.95, top-k 20): 70 tok/s.
 
 Raw rows: `results/prefill_chunk2048_vs_4096.jsonl`.
 
-**Agent replay** (`bench/agent_replay.py`, patches 0001–0002, `--parallel 4`, greedy, thinking off; only the engine
+**Agent replay** (`bench/agent_replay.py` run on the head node, `--parallel 4`, greedy, thinking off; only the engine
 binary changes). Three sessions of 72K / 80K / 89K tokens (one carries an image) take 5 turns each in rotation.
 Every turn appends the previous reply plus ~2.7K tokens of tool output. The KV pool is 262,144 positions, so the
 sessions crowd each other out, as several agents do on the 1M pool.
 
-| | Stock | Patched |
-|---|---:|---:|
-| Time to first token, turns 2–5, mean | 33.8 s | **4.9 s** (6.9×) |
-| Time to first token, turns 2–5, max | 49.4 s | **5.5 s** (9.1×) |
-| Prompt tokens served from cache, turns 2–5 | 21 % | **96 %** |
-| Wall time, 15 turns | 536 s | **192 s** (2.8×) |
-| Replies identical to the stock build | | **15 / 15** |
+| | Stock | Patched (no 0005) | Patched + 0005 |
+|---|---:|---:|---:|
+| Time to first token, turns 2–5, mean | 31.6 s | **2.1 s** (15×) | 2.6 s |
+| Time to first token, turns 2–5, max | 45.6 s | **2.6 s** (17×) | 3.4 s |
+| Prompt tokens served from cache, turns 2–5 | 21 % | **96 %** | 95 % |
+| Wall time, 15 turns | 504 s | **148 s** (3.4×) | 146 s |
+| Replies identical to the stock build | | **15 / 15** | 0 / 15 |
 
-Raw rows: `results/agent_replay_{stock,patched}.json`.
+Raw rows: `results/agent_replay_local_{stock,patched,patched_0005}.json`. Run from a remote client over a high-latency
+link, each turn took 2–4 s longer: the 300–430 KB request went out on a fresh TCP connection every turn. Keep the
+agents near the server, or reuse connections.
 
 **Gates**
 
@@ -122,6 +133,19 @@ These measurements guide the next patches.
 
   Plus 3.6 ms for the drafter pass. A 1-row round reads ~4.3 GB of weights per rank (attention 1.7, routed experts
   1.5, shared expert 0.4, head 0.25), i.e. ~18 ms at DRAM speed: with the ring, communication is no longer the limit.
+- **Inside a 1-row round** (GPU clocks at every phase, inside the CUDA graphs; `results/decode_round_phases.json`):
+
+  | Phase | ms | Weights read | At 238 GB/s |
+  |---|---:|---:|---:|
+  | Routed and shared experts | 8.4 | 1.94 GB | 8.1 ms |
+  | Attention projections (wq_a, wkv, wq_b, wo_a, wo_b) | 7.1 | 1.74 GB | 7.3 ms |
+  | Router, mHC mixes, Engram | 1.7 | 0.40 GB | 1.7 ms |
+  | TP2 gathers (76 × 23 µs) | 1.8 | | |
+  | Sparse attention core, indexer, compressor | 1.1 | | |
+
+  The weight phases run at the DRAM limit (the L2 prefetch even beats it on wo_a and wo_b). The gathers are mostly
+  hidden: the prefetch fills L2 meanwhile, and removing them saves 0.1 ms. The round runs at ~90 % of DRAM bandwidth,
+  so decode speed now comes from fewer bytes per generated token, not from kernel tuning.
 - **Prefill chunk** (2,048 rows): MoE 43 % (gate/up 22 %, down 14 %, routing and input rotation 7 %), attention
   28 %, NCCL gathers 13 %, mHC mixes 10 %, Engram 5 %. Nsight Compute on the MoE kernels: ~31 instructions issued
   per tensor-core MMA (EXL3 trellis decoding), 33 % / 17 % occupancy, latency-bound, not DRAM- or tensor-bound.
@@ -134,6 +158,10 @@ These measurements guide the next patches.
 - Prompt MoE kernels over 128 rows a program (bit-exact, written for this): 15-30 % slower, since most experts get
   64 rows or fewer per chunk.
 - Prefill all-gathers in row pieces on a side stream, under the mHC mixes: within noise (±1.5 %).
+- Coupled drafts at T>0 (the drafter draws with the target's own keyed Gumbel noise, sharpened by a factor λ;
+  outputs unchanged): −6 % rounds on code with thinking, nothing on prose, −1 to −2 % overall. The drafter finds the
+  target's top token, not the shape of its distribution.
+- 4,096-row prompt chunks (patch 0005): faster cold prefill, but different replies and slower cached agent turns.
 
 ## Build and run
 
@@ -158,8 +186,11 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 Work in progress, in this repository:
 - several streams per round (4 and 8 streams), longer copy windows for code and agent output;
 - a round-cost table measured with the ring (the served one is 8-10 ms too high);
-- tokenizer memoization for long agent sessions;
+- a bigger cache of the drafter's Markov bias rows (a miss reads 66 MB);
 - adaptive top-k, only if quality and security-knowledge scores hold.
+
+A decode round is already at ~90 % of DRAM bandwidth and each extra verified row costs ~4 ms, mostly new experts:
+what is left is in tokens per weight read (drafts, streams), not in kernels.
 
 ## Credits
 

@@ -29,6 +29,7 @@ Apply on `deepseek-v41-zig` @ `4e80f05` with `git am patches/*.patch`.
 | 0002 | When the shared KV pool needs a kept state's rows, each rank writes its half to NVMe (O_DIRECT) instead of dropping it, and reads it back on resume. | `TF_DS_SPILL_DIR=<dir>` on both ranks (cap `TF_DS_SPILL_GIB`, default 48) |
 | 0003 | `tf-dsv41-lanes`: per-request `fix_k` and per-request round costs (a measurement tool). | tool |
 | 0004 | Adaptive top-k for the routed experts of decode windows. Experimental: quality not validated yet. | off (`TF_DS_TOPK_TAU`) |
+| 0005 | Prompt chunks of 4,096 rows instead of 2,048. ~2.5 GB more arena per rank. | on |
 
 ## Results
 
@@ -52,6 +53,16 @@ gather fails, which is why the stock setup runs NCCL. Set MTU 9000 on both RoCE 
 # rank 0 (tensorfold-native serve)      # rank 1 (tf-dsv41-lanes)
 TF_RDMA_DEVICES=rocep1s0f1,roceP2p1s0f1   --rdma rocep1s0f1,roceP2p1s0f1
 ```
+
+**Prefill** (`tf-dsv41-lanes` harness, MTU 9000, one request at a time). Patch 0005, same first tokens:
+
+| Prompt | 2,048-row chunks | 4,096-row chunks | Gain |
+|---|---:|---:|---:|
+| 8K tokens | 3.75 s | **3.53 s** | +6 % |
+| 32K tokens | 13.32 s | **12.64 s** | +5 % |
+| 128K tokens | 56.90 s | **53.95 s** | +5 % |
+
+Raw rows: `results/prefill_chunk2048_vs_4096.jsonl`.
 
 **Agent replay** (`bench/agent_replay.py`, patches 0001–0002, `--parallel 4`, greedy, thinking off; only the engine
 binary changes). Three sessions of 72K / 80K / 89K tokens (one carries an image) take 5 turns each in rotation.
@@ -82,16 +93,28 @@ Raw rows: `results/agent_replay_{stock,patched}.json`.
 These measurements guide the next patches.
 
 - **GB10** (`bench/hwbench.py`, `results/hw_gb10.json`): 238 GB/s DRAM read, 95 TFLOPS BF16, 199 FP8, 339 NVFP4.
-- **Decode round** (CUDA graphs on, one stream):
+- **Decode round** (CUDA graphs on, one stream), forward ms by rows verified:
 
-  | Rows verified | 1 | 2 | 3 | 4 | 5 | 6 |
+  | Rows | 1 | 2 | 3 | 4 | 5 | 6 |
   |---|---:|---:|---:|---:|---:|---:|
-  | Forward, ms | 24.7 | 29.6 | 34.0 | 38.5 | 42.2 | 45.6 |
+  | NCCL gathers | 24.6 | 29.7 | 33.9 | 38.2 | 42.0 | 45.7 |
+  | RDMA ring | 22.1 | 27.2 | 31.3 | 35.2 | 39.2 | 42.3 |
+  | no gathers at all (wrong outputs, timing only) | 22.0 | 26.7 | 30.5 | 34.0 | 37.6 | 40.9 |
 
-  Add 4.1 ms for the drafter pass. About 16 ms of the 1-row round is weight streaming at DRAM speed and ~5 ms is
-  NCCL all-gathers (80 a round); the RDMA ring saves ~3 ms of that. The decode is bandwidth-bound.
-- **Prefill chunk** (2,048 rows, 32K prompt): MoE 46 %, attention 25 %, NCCL gathers 14 %, mHC mixes 15 %. That is
-  ~2.5× above what the bandwidth and the tensor cores allow.
+  Plus 3.6 ms for the drafter pass. A 1-row round reads ~4.3 GB of weights per rank (attention 1.7, routed experts
+  1.5, shared expert 0.4, head 0.25), i.e. ~18 ms at DRAM speed: with the ring, communication is no longer the limit.
+- **Prefill chunk** (2,048 rows): MoE 43 % (gate/up 22 %, down 14 %, routing and input rotation 7 %), attention
+  28 %, NCCL gathers 13 %, mHC mixes 10 %, Engram 5 %. Nsight Compute on the MoE kernels: ~31 instructions issued
+  per tensor-core MMA (EXL3 trellis decoding), 33 % / 17 % occupancy, latency-bound, not DRAM- or tensor-bound.
+
+## Tried, no gain
+
+- NCCL protocols (LL, LL128, auto) and tuning (channels, QPs per connection, GPUDirect level, buffer size).
+- MTU 9000 with NCCL gathers (decode unchanged; it only enables the RDMA ring).
+- The RDMA ring for the large prefill gathers: 2.97 ms for 42 MB against 2.25 ms with NCCL.
+- Prompt MoE kernels over 128 rows a program (bit-exact, written for this): 15-30 % slower, since most experts get
+  64 rows or fewer per chunk.
+- Prefill all-gathers in row pieces on a side stream, under the mHC mixes: within noise (±1.5 %).
 
 ## Build and run
 
@@ -114,8 +137,8 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 ## Next
 
 Work in progress, in this repository:
-- prefill: 4,096-row chunks; overlap the all-gathers with compute (NCCL tops out at ~19 GB/s on this link);
-- several streams per round, and longer copy windows for code and agent output;
+- several streams per round (4 and 8 streams), longer copy windows for code and agent output;
+- a round-cost table measured with the ring (the served one is 8-10 ms too high);
 - tokenizer memoization for long agent sessions;
 - adaptive top-k, only if quality and security-knowledge scores hold.
 

@@ -1,0 +1,8 @@
+{"chunk": "chunk2048", "request": 0, "name": "fill8192", "prompt_tokens": 8192, "prefill_s": 3.75}
+{"chunk": "chunk2048", "request": 1, "name": "fill32768", "prompt_tokens": 32768, "prefill_s": 13.32}
+{"chunk": "chunk2048", "request": 2, "name": "fill131072", "prompt_tokens": 131072, "prefill_s": 56.9}
+{"chunk": "chunk2048", "prefill_phases_ms": {"start": 0.0, "embed": 0.467, "engram": 45.182, "mix_attn": 43.991, "attn": 251.138, "gather_a": 55.495, "mix_ffn": 45.162, "moe": 377.51, "gather_m": 58.458, "post": 0.0, "head": 0.047, "a_in": 0.0, "a_q": 0.0, "a_idx": 0.0, "a_core": 0.0, "a_woa": 0.0, "a_x": 0.0, "m_rt": 0.0, "m_gu": 0.0, "m_x": 0.0}, "chunks": 84}
+{"chunk": "chunk4096", "request": 0, "name": "fill8192", "prompt_tokens": 8192, "prefill_s": 3.53}
+{"chunk": "chunk4096", "request": 1, "name": "fill32768", "prompt_tokens": 32768, "prefill_s": 12.64}
+{"chunk": "chunk4096", "request": 2, "name": "fill131072", "prompt_tokens": 131072, "prefill_s": 53.95}
+{"chunk": "chunk4096", "prefill_phases_ms": {"start": 0.0, "embed": 0.937, "engram": 89.513, "mix_attn": 86.449, "attn": 0.022, "gather_a": 100.242, "mix_ffn": 90.097, "moe": 701.523, "gather_m": 108.444, "post": 0.0, "head": 0.091, "a_in": 43.931, "a_q": 65.803, "a_idx": 128.249, "a_core": 118.859, "a_woa": 71.636, "a_x": 57.967, "m_rt": 0.0, "m_gu": 0.0, "m_x": 0.0}, "chunks": 42}

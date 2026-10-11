@@ -1,4 +1,4 @@
-# DeepSeek-V4.1-Flash on 2× DGX Spark: engine patches
+# DeepSeek-V4.1-Flash 2× DGX Spark
 
 Patches for the TP2 Zig engine that serves DeepSeek-V4.1-Flash (EXL3 2.9 bpw) across two NVIDIA GB10 nodes:
 the `dsv41` family of [bertholomus/TensorFold, branch `deepseek-v41-zig`](https://github.com/bertholomus/TensorFold/tree/deepseek-v41-zig),

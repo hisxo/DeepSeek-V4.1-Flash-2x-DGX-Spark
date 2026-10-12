@@ -1,0 +1,105 @@
+From 9f0cec280550d7982e4563885027331ea296ac86 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 12:53:40 +0200
+Subject: [PATCH 13/15] dsv41: TF_DS_MARKOV_ROWS learns the Markov loop's bias
+ rows as the drafter meets tokens
+
+A Markov step reads its input token's cached bias row, else computes the row from the whole Markov head (~33 MB a rank, ~140 us). Only the 256 rows filled at load were cached. With TF_DS_MARKOV_ROWS=<n>, the tokens a pass's steps read (and its drafts) that have no row join a batch; every 16 get their rows (the bias kernel the load uses) and slots, up to n rows (4,096: ~0.5 GB a rank). Which tokens have cached rows changes how long a step takes, never a draft. Thinking at T=1: drafter pass 3.92 -> 3.67 ms; greedy: 3.62 -> 3.51 ms.
+---
+ zig/src/families/dsv41/draft.zig | 52 ++++++++++++++++++++++++++++++--
+ 1 file changed, 49 insertions(+), 3 deletions(-)
+
+diff --git a/zig/src/families/dsv41/draft.zig b/zig/src/families/dsv41/draft.zig
+index 846fa8e..8266cfc 100644
+--- a/zig/src/families/dsv41/draft.zig
++++ b/zig/src/families/dsv41/draft.zig
+@@ -231,6 +231,14 @@ pub const Drafter = struct {
+     // coupled drafts (TF_DS_COUPLED_DRAFTS): the kernels, and whether this pass draws with them (a stream at T > 0)
+     coupled: ?Coupled = null,
+     coupled_now: bool = false,
++    // TF_DS_MARKOV_ROWS: the cached bias rows at most (mk_cap), filled so far (mk_used); the slot table's host copy and
++    // the tokens waiting for their rows (empty mk_host: the 256 rows of load alone)
++    mk_cap: usize = 0,
++    mk_used: usize = 0,
++    mk_host: []i32 = &.{},
++    mk_tok: u64 = 0,
++    mk_pend: [tri_markov.np]i64 = undefined,
++    mk_npend: usize = 0,
+     // the last pass on the host: each stream's drafts and confidences (`steps` of them)
+     streams: usize = 0,
+     steps: usize = 0,
+@@ -261,6 +269,11 @@ pub const Drafter = struct {
+         dr.graphs = null;
+         dr.coupled = null;
+         dr.coupled_now = false;
++        dr.mk_cap = 0;
++        dr.mk_used = 0;
++        dr.mk_host = &.{};
++        dr.mk_tok = 0;
++        dr.mk_npend = 0;
+         dr.rows = try a.take(6 * R * 8);
+         dr.bidx = try a.take(R * pick_pad * 8);
+         dr.wlo = try a.take(8);
+@@ -321,16 +334,21 @@ pub const Drafter = struct {
+         const k = markov_tokens.cached.len;
+         const tok = try a.take(k * 8);
+         try prompt.upload(e, tok, &markov_tokens.cached, k * 8);
+-        const cache = try a.take(k * dr.mk.cols * 2);
++        // TF_DS_MARKOV_ROWS: room for more cached rows, filled as the drafter meets their tokens (TP2 only)
++        const rows_cap: usize = if (e.two == null) (if (std.c.getenv("TF_DS_MARKOV_ROWS")) |v| @max(k, std.fmt.parseInt(usize, std.mem.span(v), 10) catch k) else k) else k;
++        const cache = try a.take(rows_cap * dr.mk.cols * 2);
+         const slot = try a.take(c.vocab * 4);
+         {
+             const host = try std.heap.page_allocator.alloc(i32, c.vocab);
+-            defer std.heap.page_allocator.free(host);
+             @memset(host, -1);
+             for (markov_tokens.cached, 0..) |t, j| host[@intCast(t)] = @intCast(j);
+             try prompt.upload(e, slot, host.ptr, c.vocab * 4);
+-            try e.s.synchronize(); // (the host table is freed next)
++            try e.s.synchronize(); // (the host table is freed next, or kept for the rows filled later)
++            if (rows_cap > k) dr.mk_host = host else std.heap.page_allocator.free(host);
+         }
++        dr.mk_cap = rows_cap;
++        dr.mk_used = k;
++        if (rows_cap > k) dr.mk_tok = try a.take(tri_markov.np * 8);
+         try dr.mk.fill(e.t, tok, k, cache, slot);
+         dr.msc = .{
+             .pv = try a.take(max_streams * dr.mk.n_part * 4),
+@@ -488,6 +506,34 @@ pub const Drafter = struct {
+         };
+         dr.streams = N;
+         dr.steps = steps;
++        if (dr.mk_host.len > 0) try dr.learnMarkov(e, ho[0 .. N * ts], N, ts, steps);
++    }
++
++    /// TF_DS_MARKOV_ROWS: the tokens this pass's steps read and its drafts, without a cached bias row, join the batch;
++    /// a batch of 16 gets its rows and slots before the next pass.
++    fn learnMarkov(dr: *Drafter, e: *const Engine, ho: []const i64, N: usize, ts: usize, steps: usize) !void {
++        for (0..N) |i| for (0..steps + 1) |j| {
++            const t = ho[i * ts + j];
++            if (t < 0 or t >= dr.mk_host.len) continue;
++            if (dr.mk_host[@intCast(t)] >= 0 or dr.mk_used + dr.mk_npend >= dr.mk_cap) continue;
++            if (std.mem.indexOfScalar(i64, dr.mk_pend[0..dr.mk_npend], t) != null) continue;
++            dr.mk_pend[dr.mk_npend] = t;
++            dr.mk_npend += 1;
++            if (dr.mk_npend == tri_markov.np) try dr.fillMarkov(e);
++        };
++    }
++
++    /// The batch's bias rows into the next cache rows (the bias kernel over every row, as Markov.fill at load), then
++    /// their slots (the whole table uploaded: the next pass reads it in the stream's order).
++    fn fillMarkov(dr: *Drafter, e: *const Engine) !void {
++        const k = dr.mk_npend;
++        if (k == 0) return;
++        try prompt.upload(e, dr.mk_tok, &dr.mk_pend, k * 8);
++        try dr.mk.bias(e.t, dr.mk_tok, 1, dr.mk.none, dr.mk.cache + 2 * dr.mk_used * dr.mk.cols, dr.mk.cols, k);
++        for (dr.mk_pend[0..k], 0..) |t, j| dr.mk_host[@intCast(t)] = @intCast(dr.mk_used + j);
++        try prompt.upload(e, dr.mk.slot, dr.mk_host.ptr, dr.mk_host.len * 4);
++        dr.mk_used += k;
++        dr.mk_npend = 0;
+     }
+ 
+     /// The pass's device work for N streams of `steps` drafts, from the rows' embeddings to the confidence head (its
+-- 
+2.49.0
+

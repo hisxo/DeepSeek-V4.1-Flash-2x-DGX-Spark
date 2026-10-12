@@ -1,0 +1,621 @@
+From bff79e5a82b7cd87090ecd553470b24b7aa99b40 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 10:51:46 +0200
+Subject: [PATCH] dsv41: coupled drafts (TF_DS_COUPLED_DRAFTS): at T > 0 the
+ drafter draws with the target's keyed noise
+
+The DSpark Markov loop takes each step's argmax. At temperature > 0 the target draws its token
+by Gumbel-max over its top-k, with noise keyed by (seed, position, token id) (sampling.zig), so
+a draft lands only when the target's draw falls on the drafter's argmax. With
+TF_DS_COUPLED_DRAFTS=<lambda>, each step draws instead the way the target will draw that
+position: sampleRow's rule (top_k, top_p, min_p) on the drafter's scores, with the target's
+own keyed noise scaled by lambda (1: the target's very draw on the drafter's scores; 0: the
+argmax). Where the drafter and the target agree on the winner of the same noise, the draft
+lands. The target's tokens never change: the verification keeps the target's own draw.
+
+The kernel pair (coupled_draft.cu, embedded as the dsv41_coupled fatbin): each rank's 32 best
+columns of a step's scores (a sorted list per warp, merged pairwise), their gather over the
+ranks, then one warp merges them and draws. The coupled loop runs only in passes where a stream
+samples (pass graphs keyed by it); a top_k of 0 drafts over the 32 best. Thinking at T=1
+(code, prose, structured, security Q&A; 768 tokens each): 73.1 -> 75.3 tok/s at lambda 0.5,
+1,053 -> 1,015 rounds, same tokens; the drafter pass costs 0.25 ms more.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012LKX4U7yxGzgs3Ejvas9Q7
+---
+ zig/build/cuda.zig                      |   1 +
+ zig/kernels/cuda/dsv41/coupled_draft.cu | 248 ++++++++++++++++++++++++
+ zig/src/cuda/kernels.zig                |   1 +
+ zig/src/families/dsv41/draft.zig        | 142 +++++++++++++-
+ zig/src/families/dsv41/lanes.zig        |  13 +-
+ zig/src/families/dsv41/layer_main.zig   |   4 +-
+ zig/src/families/dsv41/model.zig        |  10 +-
+ 7 files changed, 409 insertions(+), 10 deletions(-)
+ create mode 100644 zig/kernels/cuda/dsv41/coupled_draft.cu
+
+diff --git a/zig/build/cuda.zig b/zig/build/cuda.zig
+index 2ba004c..29a9166 100644
+--- a/zig/build/cuda.zig
++++ b/zig/build/cuda.zig
+@@ -30,6 +30,7 @@ const kernels = [_]Kernel{
+     .{ .name = "dsv41_ops", .flags = torch_ops }, // ours: the DeepSeek-V4.1 casts torch_ops/ lacks
+     .{ .name = "dsv41_torch", .flags = torch_ops }, // ours: DeepSeek-V4.1 torch arithmetic at torch's rounding points
+     .{ .name = "dsv41_rdma", .src = "dsv41/rdma_gather", .flags = &.{"-O3"} }, // ours: the decode gathers' RDMA kernel pair
++    .{ .name = "dsv41_coupled", .src = "dsv41/coupled_draft", .flags = &.{"-O3"} }, // ours: coupled drafts (the target's keyed draws)
+ };
+ 
+ /// torch.utils.cpp_extension's own nvcc flags (torch 2.13): C++20 and which half/bf16 operators the headers define.
+diff --git a/zig/kernels/cuda/dsv41/coupled_draft.cu b/zig/kernels/cuda/dsv41/coupled_draft.cu
+new file mode 100644
+index 0000000..a147d84
+--- /dev/null
++++ b/zig/kernels/cuda/dsv41/coupled_draft.cu
+@@ -0,0 +1,248 @@
++// Coupled drafts for the DSpark Markov loop at temperature > 0 (TF_DS_COUPLED_DRAFTS). A step's score is the
++// drafter's logit plus the Markov bias of the previous token, as markov.py's _score; instead of the argmax, each row
++// draws its token the way the target's sampler (sampling.zig sampleRow) will draw the token at that position: its
++// top_k candidates (value, then lower id), the top_p and min_p cuts on their scaled probabilities, then the first best
++// of scaled value + lambda * gumbel, the gumbel from the target's keyed uniform at that position. lambda 1: the very
++// draw the target makes, on the drafter's scores; 0: the argmax (the original loop's pick); in between: a sharper
++// drafter on the same noise. The target's tokens never change (verification keeps the target's own draw): a draft
++// lands more often when the drafter and the target agree on the winner of the same noise. Temperature 0: the argmax.
++#include <cuda_fp16.h>
++#include <stdint.h>
++
++#define KMAX 32
++#define CD_CH 8
++#define CD_WMAX 8
++#define FULL 0xffffffffu
++
++__device__ __forceinline__ bool before(float va, int ia, float vb, int ib) {
++    return va > vb || (va == vb && ia < ib);
++}
++
++// A warp's sorted list (lane i holds the i-th best under `before`): insert the lanes' items (s, g) of mask m that still
++// beat the list's K-th item (tv, ti), keeping that K-th item current.
++__device__ __forceinline__ void warp_insert(float& lv, int& li, float s, int g, unsigned m, int K, float& tv, int& ti) {
++    const int lane = threadIdx.x & 31;
++    while (m) {
++        const int src = __ffs(m) - 1;
++        m &= m - 1;
++        const float nv = __shfl_sync(FULL, s, src);
++        const int ni = __shfl_sync(FULL, g, src);
++        const float pv = __shfl_up_sync(FULL, lv, 1);
++        const int pi = __shfl_up_sync(FULL, li, 1);
++        if (before(nv, ni, lv, li)) {
++            if (lane > 0 && before(nv, ni, pv, pi)) {
++                lv = pv;
++                li = pi;
++            } else {
++                lv = nv;
++                li = ni;
++            }
++        }
++        tv = __shfl_sync(FULL, lv, K - 1);
++        ti = __shfl_sync(FULL, li, K - 1);
++        m &= __ballot_sync(FULL, before(s, g, tv, ti));
++    }
++}
++
++// Program r (1024 threads): row r's scores over this rank's columns, its K best (value desc, id asc) into
++// SEND[r * 2K]: the values in [0, K), the ids (as floats, exact below 2^24) in [K, 2K). Each warp keeps a sorted
++// list of its columns' best (8 chunks of 32 columns offered while the next 8 load), then the lists merge pairwise.
++extern "C" __global__ void __launch_bounds__(1024) dsv41_coupled_topk(const float* __restrict__ LG, long long l_row,
++                                                                      const long long* __restrict__ TOK, int t_stride,
++                                                                      const int* __restrict__ SLOT,
++                                                                      const __half* __restrict__ CACHE, long long c_row,
++                                                                      const __half* __restrict__ STAGE, long long s_row,
++                                                                      int n_cols, int seg0, float* __restrict__ SEND,
++                                                                      int K) {
++    const int r = blockIdx.x;
++    const long long tok = TOK[(long long)r * t_stride];
++    const int slot = SLOT[tok];
++    const __half* brow = slot >= 0 ? CACHE + (long long)slot * c_row : STAGE + (long long)r * s_row;
++    const float* lrow = LG + (long long)r * l_row;
++    const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5, nw = blockDim.x >> 5;
++    if (K > KMAX) K = KMAX;
++    if (K < 1) K = 1;
++    float lv = -INFINITY, tv = -INFINITY;
++    int li = 0x7fffffff, ti = 0x7fffffff;
++    const int gofs = seg0 * n_cols;
++    const int stride = nw * 32 * CD_CH;
++    float a[CD_CH], b[CD_CH];
++    int base = warp * 32 * CD_CH;
++#pragma unroll
++    for (int u = 0; u < CD_CH; ++u) {
++        const int c = base + u * 32 + lane;
++        a[u] = c < n_cols ? lrow[c] : -INFINITY;
++        b[u] = c < n_cols ? __half2float(brow[c]) : 0.f;
++    }
++    for (; base < n_cols; base += stride) {
++        float s[CD_CH];
++#pragma unroll
++        for (int u = 0; u < CD_CH; ++u) s[u] = a[u] + b[u];
++        const int nb = base + stride;
++#pragma unroll
++        for (int u = 0; u < CD_CH; ++u) {
++            const int c = nb + u * 32 + lane;
++            a[u] = c < n_cols ? lrow[c] : -INFINITY;
++            b[u] = c < n_cols ? __half2float(brow[c]) : 0.f;
++        }
++#pragma unroll
++        for (int u = 0; u < CD_CH; ++u) {
++            const int c = base + u * 32 + lane;
++            const int g = c < n_cols ? gofs + c : 0x7fffffff;
++            const float v = c < n_cols ? s[u] : -INFINITY;
++            const unsigned m = __ballot_sync(FULL, before(v, g, tv, ti));
++            if (m) warp_insert(lv, li, v, g, m, K, tv, ti);
++        }
++    }
++    __shared__ float sv[32 * 32];
++    __shared__ int si[32 * 32];
++    for (int step = 1; step < nw; step <<= 1) {
++        if ((warp & (2 * step - 1)) == step) {
++            sv[warp * 32 + lane] = lv;
++            si[warp * 32 + lane] = li;
++        }
++        __syncthreads();
++        if ((warp & (2 * step - 1)) == 0 && warp + step < nw) {
++            const float s = sv[(warp + step) * 32 + lane];
++            const int g = si[(warp + step) * 32 + lane];
++            const unsigned m = __ballot_sync(FULL, before(s, g, tv, ti));
++            if (m) warp_insert(lv, li, s, g, m, K, tv, ti);
++        }
++        __syncthreads();
++    }
++    if (warp == 0 && lane < K) {
++        SEND[(long long)r * 2 * K + lane] = lv;
++        SEND[(long long)r * 2 * K + K + lane] = (float)li;
++    }
++}
++
++__device__ __forceinline__ unsigned long long mix64(unsigned long long x) {
++    x ^= x >> 30;
++    x *= 0xBF58476D1CE4E5B9ull;
++    x ^= x >> 27;
++    x *= 0x94D049BB133111EBull;
++    return x ^ (x >> 31);
++}
++
++// exact_sampling.uniform's bits: a (0, 1) value from a splitmix64 chain of (seed, position, token id), as the integer
++// numerator over 2^53 (u = (b + 0.5) / 2^53)
++__device__ __forceinline__ unsigned long long keyed_bits(unsigned long long seed, unsigned long long pos, unsigned long long id) {
++    unsigned long long x = mix64(seed + 0x9E3779B97F4A7C15ull);
++    x = mix64(x ^ (pos * 0xD1B54A32D192ED03ull));
++    x = mix64(x ^ id);
++    return x >> 11;
++}
++
++// -log(-log(u)) in float for u = (b + 0.5) / 2^53, accurate at both ends: -log(u) from u when u < 1/2, else from 1 - u
++__device__ __forceinline__ float gumbel_of(unsigned long long b) {
++    const unsigned long long half = 1ull << 52;
++    float e1;
++    if (b < half) {
++        e1 = -logf(((float)b + 0.5f) * 0x1p-53f);
++    } else {
++        const unsigned long long rest = (1ull << 53) - b;  // 1 - u = (rest - 0.5) / 2^53
++        e1 = -log1pf(-(((float)rest - 0.5f) * 0x1p-53f));
++    }
++    return -logf(e1);
++}
++
++// One warp: each row's candidates from every rank's K best (G [world, rows, 2K], each rank's list in order) merged
++// under (value desc, id asc) by counting, then the drawn token (sampleRow's rule at position Q0[r] + 1 + step, the
++// noise scaled by lam; lane j the j-th candidate) into OUT[r * o_stride].
++extern "C" __global__ void dsv41_coupled_pick(const float* __restrict__ G, int rows, int world, int K,
++                                              long long* __restrict__ OUT, int o_stride,
++                                              const unsigned long long* __restrict__ SEED,
++                                              const long long* __restrict__ Q0, int step, const float* __restrict__ TEMP,
++                                              const int* __restrict__ TOPK, const float* __restrict__ TOPP,
++                                              const float* __restrict__ MINP, float lam) {
++    __shared__ float gv[CD_WMAX * KMAX];
++    __shared__ int gi[CD_WMAX * KMAX];
++    __shared__ float mv[CD_WMAX * KMAX];
++    __shared__ int mi[CD_WMAX * KMAX];
++    if (threadIdx.x >= 32) return;
++    const int lane = threadIdx.x;
++    if (world > CD_WMAX) world = CD_WMAX;
++    if (K > KMAX) K = KMAX;
++    const int nt = world * K;
++    for (int r = 0; r < rows; ++r) {
++        for (int t = lane; t < nt; t += 32) {
++            const int w = t / K, j = t - w * K;
++            const float* g = G + ((long long)w * rows + r) * 2 * K;
++            gv[t] = g[j];
++            gi[t] = (int)g[K + j];
++        }
++        __syncwarp();
++        int valid = 0;
++        for (int t = lane; t < nt; t += 32) {
++            const int w = t / K, j = t - w * K;
++            const float v = gv[t];
++            const int id = gi[t];
++            int pos = j;
++            for (int w2 = 0; w2 < world; ++w2) {
++                if (w2 == w) continue;
++                int lo = 0, hi = K;
++                while (lo < hi) {
++                    const int mid = (lo + hi) >> 1;
++                    if (before(gv[w2 * K + mid], gi[w2 * K + mid], v, id)) lo = mid + 1;
++                    else hi = mid;
++                }
++                pos += lo;
++            }
++            mv[pos] = v;
++            mi[pos] = id;
++            valid += v > -INFINITY ? 1 : 0;
++        }
++#pragma unroll
++        for (int o = 16; o > 0; o >>= 1) valid += __shfl_xor_sync(FULL, valid, o);
++        __syncwarp();
++        const float temp = TEMP[r];
++        int pick = 0;
++        if (valid > 0) {
++            pick = mi[0];
++            if (temp > 0.f && lam > 0.f) {
++                int k = TOPK[r];
++                if (k > valid) k = valid;
++                if (k > 32) k = 32;
++                if (k < 1) k = 1;
++                const float inv_t = 1.0f / fmaxf(temp, 1e-6f);
++                const bool on = lane < k;
++                const float sc = on ? mv[lane] * inv_t : -INFINITY;
++                float score = on ? sc + lam * gumbel_of(keyed_bits(SEED[r], (unsigned long long)(Q0[r] + 1 + step),
++                                                                   (unsigned long long)(long long)mi[lane]))
++                                 : -INFINITY;
++                const float top = __shfl_sync(FULL, sc, 0);
++                const float top_p = TOPP[r];
++                if (0.f < top_p && top_p < 1.f) {
++                    const float p = on ? expf(sc - top) : 0.f;
++                    float sum = p;
++#pragma unroll
++                    for (int o = 16; o > 0; o >>= 1) sum += __shfl_xor_sync(FULL, sum, o);
++                    float acc = p / sum;
++#pragma unroll
++                    for (int o = 1; o < 32; o <<= 1) {
++                        const float x = __shfl_up_sync(FULL, acc, o);
++                        if (lane >= o) acc += x;
++                    }
++                    const int below = __popc(__ballot_sync(FULL, on && acc < top_p));
++                    if (lane > below) score = -INFINITY;
++                }
++                const float min_p = MINP[r];
++                if (min_p > 0.f && on && sc < top + logf(min_p)) score = -INFINITY;
++                float bv = score;
++                int bj = lane;
++#pragma unroll
++                for (int o = 16; o > 0; o >>= 1) {
++                    const float ov = __shfl_xor_sync(FULL, bv, o);
++                    const int oj = __shfl_xor_sync(FULL, bj, o);
++                    if (ov > bv || (ov == bv && oj < bj)) {
++                        bv = ov;
++                        bj = oj;
++                    }
++                }
++                pick = mi[bj];
++            }
++        }
++        if (lane == 0) OUT[(long long)r * o_stride] = pick;
++        __syncwarp();
++    }
++}
+diff --git a/zig/src/cuda/kernels.zig b/zig/src/cuda/kernels.zig
+index 75a4230..5bd7a60 100644
+--- a/zig/src/cuda/kernels.zig
++++ b/zig/src/cuda/kernels.zig
+@@ -33,6 +33,7 @@ pub const torch_nemotron_constants: []const u8 = if (available) &Blob("fatbin_to
+ pub const dsv41_ops: []const u8 = if (available) &Blob("fatbin_dsv41_ops").bytes else &.{};
+ pub const dsv41_torch: []const u8 = if (available) &Blob("fatbin_dsv41_torch").bytes else &.{};
+ pub const dsv41_rdma: []const u8 = if (available) &Blob("fatbin_dsv41_rdma").bytes else &.{};
++pub const dsv41_coupled: []const u8 = if (available) &Blob("fatbin_dsv41_coupled").bytes else &.{};
+ 
+ /// Symbols in the gdn image as cuobjdump lists them for the built fatbin (named namespace tf_gdn).
+ pub const gdn_symbols = struct {
+diff --git a/zig/src/families/dsv41/draft.zig b/zig/src/families/dsv41/draft.zig
+index 5ac250b..846fa8e 100644
+--- a/zig/src/families/dsv41/draft.zig
++++ b/zig/src/families/dsv41/draft.zig
+@@ -116,7 +116,7 @@ pub const PassGraphs = struct {
+     gpa: std.mem.Allocator,
+     map: std.AutoHashMapUnmanaged(Key, cuda.graph.Exec) = .empty,
+ 
+-    pub const Key = struct { streams: u32, steps: u32 };
++    pub const Key = struct { streams: u32, steps: u32, coupled: bool };
+ 
+     pub fn init(gpa: std.mem.Allocator) PassGraphs {
+         return .{ .gpa = gpa };
+@@ -134,7 +134,7 @@ pub const PassGraphs = struct {
+     }
+ 
+     fn run(g: *PassGraphs, dr: *Drafter, e: *const Engine, ch: *const Chunk, pool: *const Pool, N: usize, steps: usize) !void {
+-        const key: Key = .{ .streams = @intCast(N), .steps = @intCast(steps) };
++        const key: Key = .{ .streams = @intCast(N), .steps = @intCast(steps), .coupled = dr.coupled_now };
+         if (g.map.getPtr(key)) |x| return x.launchOn(e.s);
+         try cuda.graph.beginCapture(e.s, .thread_local);
+         dr.body(e, ch, pool, N, steps, null) catch |err| {
+@@ -228,6 +228,9 @@ pub const Drafter = struct {
+     arows: u64,
+     // the pass's graphs (BatchDraftGraph: one a streams and steps; null: eager)
+     graphs: ?*PassGraphs = null,
++    // coupled drafts (TF_DS_COUPLED_DRAFTS): the kernels, and whether this pass draws with them (a stream at T > 0)
++    coupled: ?Coupled = null,
++    coupled_now: bool = false,
+     // the last pass on the host: each stream's drafts and confidences (`steps` of them)
+     streams: usize = 0,
+     steps: usize = 0,
+@@ -256,6 +259,8 @@ pub const Drafter = struct {
+         dr.streams = 0;
+         dr.steps = 0;
+         dr.graphs = null;
++        dr.coupled = null;
++        dr.coupled_now = false;
+         dr.rows = try a.take(6 * R * 8);
+         dr.bidx = try a.take(R * pick_pad * 8);
+         dr.wlo = try a.take(8);
+@@ -435,12 +440,18 @@ pub const Drafter = struct {
+ 
+     /// BatchDraftGraph.run for N streams (tokens at positions q0 in slots): each stream's `steps` drafts and their
+     /// confidences into drafts / confs. Each slot's rings hold its positions before q0 (absorbed).
+-    pub fn pass(dr: *Drafter, e: *const Engine, ch: *const Chunk, pool: *const Pool, tokens: []const i64, q0: []const i64, slots: []const i64, steps: usize, probe: ?Probe) !void {
++    pub fn pass(dr: *Drafter, e: *const Engine, ch: *const Chunk, pool: *const Pool, tokens: []const i64, q0: []const i64, slots: []const i64, steps: usize, probe: ?Probe, samp: []const DraftSampling) !void {
+         const N = tokens.len;
+         const n = dr.n;
+         const R = N * n;
+         if (N == 0 or N > max_streams or R > max_rows or q0.len != N or slots.len != N) return notPorted(@src());
+         if (steps == 0 or steps > n) return error.BadDraftPass;
++        // coupled drafts only when a stream samples: at temperature 0 every draw is the argmax anyway
++        dr.coupled_now = false;
++        if (dr.coupled) |*x| {
++            for (samp) |s| dr.coupled_now = dr.coupled_now or s.temperature > 0;
++            if (dr.coupled_now) try x.upload(e, q0, samp);
++        }
+         // _body's index rows: ids [token, noise ...], positions q0 + j, window positions q0 - 1, ring bases
+         var hv: [6 * max_rows]i64 = @splat(0);
+         var hb: [max_rows * pick_pad]i64 = @splat(-1);
+@@ -525,7 +536,7 @@ pub const Drafter = struct {
+         // the Markov loop: out [N, steps + 1], each stream's last token first
+         const ts = steps + 1;
+         var g: MarkovGather = .{ .e = e, .dst = dr.mg };
+-        try dr.mk.steps(t, dr.local, dr.out, ts, N, n, steps, dr.msc, .{ .ctx = &g, .run = MarkovGather.run });
++        if (dr.coupled_now) try dr.coupled.?.steps(dr, e, ts, N, n, steps) else try dr.mk.steps(t, dr.local, dr.out, ts, N, n, steps, dr.msc, .{ .ctx = &g, .run = MarkovGather.run });
+         try Probe.check(probe, .markov, S, dr.out);
+         // the confidence head: [xc (fp32), the embedding rows the steps read (fp32)] @ conf^T, a stream's first steps rows
+         const rank = c.markov_rank;
+@@ -701,3 +712,126 @@ fn notPorted(src: std.builtin.SourceLocation) error{NotPortedYet} {
+     std.debug.print("{{\"not_ported\": \"{s}:{d}\"}}\n", .{ src.file, src.line });
+     return error.NotPortedYet;
+ }
++
++/// A drafting stream's sampling, for coupled drafts (temperature 0: the argmax).
++pub const DraftSampling = struct { seed: u64 = 0, temperature: f32 = 0, top_k: i32 = 0, top_p: f32 = 1, min_p: f32 = 0 };
++
++/// Coupled drafts (coupled_draft.cu): each Markov step draws its token with the target's own keyed noise at that
++/// position (sampleRow's rule on the drafter's scores, the noise scaled by lambda) instead of taking the argmax. Each
++/// step: this rank's K best columns, their gather over the ranks, the draw. The per-stream seeds, positions and
++/// sampling settings are uploaded before each pass.
++pub const Coupled = struct {
++    mod: cuda.Module,
++    topk: cuda.Function,
++    pick: cuda.Function,
++    k: usize,
++    lam: f32,
++    send: cuda.DeviceBuffer, // fp32 [max_streams, 2K]
++    gsend: cuda.DeviceBuffer, // fp32 [world, max_streams, 2K]
++    params: cuda.DeviceBuffer, // seed u64 [S], q0 i64 [S], temperature f32 [S], top_k i32 [S], top_p f32 [S], min_p f32 [S]
++
++    pub fn load(d: *const cuda.Driver, image: []const u8, world: usize, lam: f32) !Coupled {
++        var m = try cuda.Module.load(d, image);
++        errdefer m.unload();
++        const k: usize = 32;
++        var send = try cuda.DeviceBuffer.alloc(d, max_streams * 2 * k * 4);
++        errdefer send.free();
++        var gsend = try cuda.DeviceBuffer.alloc(d, world * max_streams * 2 * k * 4);
++        errdefer gsend.free();
++        var params = try cuda.DeviceBuffer.alloc(d, max_streams * (8 + 8 + 4 + 4 + 4 + 4));
++        errdefer params.free();
++        return .{ .mod = m, .topk = try m.function("dsv41_coupled_topk"), .pick = try m.function("dsv41_coupled_pick"), .k = k, .lam = lam, .send = send, .gsend = gsend, .params = params };
++    }
++
++    fn seedAt(x: *const Coupled) u64 {
++        return x.params.ptr;
++    }
++    fn q0At(x: *const Coupled) u64 {
++        return x.params.ptr + max_streams * 8;
++    }
++    fn tempAt(x: *const Coupled) u64 {
++        return x.params.ptr + max_streams * 16;
++    }
++    fn topkAt(x: *const Coupled) u64 {
++        return x.params.ptr + max_streams * 20;
++    }
++    fn toppAt(x: *const Coupled) u64 {
++        return x.params.ptr + max_streams * 24;
++    }
++    fn minpAt(x: *const Coupled) u64 {
++        return x.params.ptr + max_streams * 28;
++    }
++
++    /// The pass's streams' settings (missing ones: the argmax) and positions, before its graph runs. A top_k of 0 (no
++    /// limit) or above K drafts over the K best.
++    pub fn upload(x: *Coupled, e: *const Engine, q0: []const i64, samp: []const DraftSampling) !void {
++        const kk: i32 = @intCast(x.k);
++        var hs: [max_streams]u64 = @splat(0);
++        var hq: [max_streams]i64 = @splat(0);
++        var ht: [max_streams]f32 = @splat(0);
++        var hk: [max_streams]i32 = @splat(kk);
++        var hp: [max_streams]f32 = @splat(1);
++        var hm: [max_streams]f32 = @splat(0);
++        for (q0, 0..) |q, i| {
++            hq[i] = q;
++            if (i < samp.len) {
++                hs[i] = samp[i].seed;
++                ht[i] = samp[i].temperature;
++                hk[i] = if (samp[i].top_k <= 0 or samp[i].top_k > kk) kk else samp[i].top_k;
++                hp[i] = samp[i].top_p;
++                hm[i] = samp[i].min_p;
++            }
++        }
++        var host: [max_streams * 32]u8 = undefined;
++        @memcpy(host[0 .. max_streams * 8], std.mem.sliceAsBytes(&hs));
++        @memcpy(host[max_streams * 8 .. max_streams * 16], std.mem.sliceAsBytes(&hq));
++        @memcpy(host[max_streams * 16 .. max_streams * 20], std.mem.sliceAsBytes(&ht));
++        @memcpy(host[max_streams * 20 .. max_streams * 24], std.mem.sliceAsBytes(&hk));
++        @memcpy(host[max_streams * 24 .. max_streams * 28], std.mem.sliceAsBytes(&hp));
++        @memcpy(host[max_streams * 28 .. max_streams * 32], std.mem.sliceAsBytes(&hm));
++        try prompt.upload(e, x.params.ptr, &host, host.len);
++    }
++
++    /// Markov.steps with coupled draws: out [N, count + 1] int64 (out[:, 0] the last tokens) -> out[:, 1:].
++    pub fn steps(x: *const Coupled, dr: *const Drafter, e: *const Engine, ts: usize, N: usize, block: usize, count: usize) !void {
++        const m = dr.mk;
++        const nc = m.n_cols;
++        const lw = if (m.lg_w != 0) m.lg_w else nc;
++        for (0..count) |i| {
++            const tok = dr.out + 8 * i;
++            try m.bias(e.t, tok, ts, m.slot, dr.msc.stage, m.cols, N);
++            var a: cuda.Args = .{};
++            a.add(dr.local + 4 * i * lw);
++            a.add(@as(c_longlong, @intCast(block * lw)));
++            a.add(tok);
++            a.add(@as(c_int, @intCast(ts)));
++            a.add(m.slot);
++            a.add(m.cache);
++            a.add(@as(c_longlong, @intCast(m.cols)));
++            a.add(dr.msc.stage);
++            a.add(@as(c_longlong, @intCast(m.cols)));
++            a.add(@as(c_int, @intCast(nc)));
++            a.add(@as(c_int, @intCast(m.seg0)));
++            a.add(x.send.ptr);
++            a.add(@as(c_int, @intCast(x.k)));
++            try cuda.launch.launch(x.topk, .{ .grid = .{ .x = @intCast(N), .y = 1, .z = 1 }, .block = .{ .x = 1024, .y = 1, .z = 1 } }, e.s, &a);
++            try e.gatherF32(x.send.ptr, x.gsend.ptr, N * 2 * x.k);
++            a = .{};
++            a.add(x.gsend.ptr);
++            a.add(@as(c_int, @intCast(N)));
++            a.add(@as(c_int, @intCast(e.world)));
++            a.add(@as(c_int, @intCast(x.k)));
++            a.add(dr.out + 8 * (i + 1));
++            a.add(@as(c_int, @intCast(ts)));
++            a.add(x.seedAt());
++            a.add(x.q0At());
++            a.add(@as(c_int, @intCast(i)));
++            a.add(x.tempAt());
++            a.add(x.topkAt());
++            a.add(x.toppAt());
++            a.add(x.minpAt());
++            a.add(x.lam);
++            try cuda.launch.launch(x.pick, .{ .grid = .{ .x = 1, .y = 1, .z = 1 }, .block = .{ .x = 32, .y = 1, .z = 1 } }, e.s, &a);
++        }
++    }
++};
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index 71ad5cd..e236621 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -627,6 +627,7 @@ pub const Lanes = struct {
+         var q0: [max_streams]i64 = undefined;
+         var slots: [max_streams]i64 = undefined;
+         var depths: [max_streams]usize = undefined;
++        var samp: [max_streams]draft.DraftSampling = undefined;
+         var asked: [max_streams]*Lane = undefined;
+         var n: usize = 0;
+         var steps: usize = 0;
+@@ -641,6 +642,7 @@ pub const Lanes = struct {
+             tokens[n] = token;
+             q0[n] = @intCast(r.position - 1);
+             slots[n] = @intCast(l.slot);
++            samp[n] = if (r.stream.sampling) |sm| .{ .seed = sm.seed, .temperature = @floatCast(sm.temperature), .top_k = @intCast(sm.top_k), .top_p = @floatCast(sm.top_p), .min_p = @floatCast(sm.min_p) } else .{};
+             depths[n] = @min(r.depth, block);
+             asked[n] = l;
+             steps = @max(steps, depths[n]);
+@@ -654,11 +656,16 @@ pub const Lanes = struct {
+                 try self.wire.int(gpa, i64, tokens[i]);
+                 try self.wire.int(gpa, i64, q0[i]);
+                 try self.wire.int(gpa, i64, slots[i]);
++                try self.wire.int(gpa, u64, samp[i].seed);
++                try self.wire.int(gpa, u32, @bitCast(samp[i].temperature));
++                try self.wire.int(gpa, i32, samp[i].top_k);
++                try self.wire.int(gpa, u32, @bitCast(samp[i].top_p));
++                try self.wire.int(gpa, u32, @bitCast(samp[i].min_p));
+             }
+             try self.flush();
+         }
+         const t0 = m.now();
+-        try m.pass(tokens[0..n], q0[0..n], slots[0..n], steps);
++        try m.pass(tokens[0..n], q0[0..n], slots[0..n], steps, samp[0..n]);
+         if (self.prof) |*p| {
+             p.pass += m.now() - t0;
+             p.passes += 1;
+@@ -910,12 +917,14 @@ pub fn follow(gpa: std.mem.Allocator, m: *Model) !void {
+                 var tokens: [max_streams]i64 = undefined;
+                 var q0: [max_streams]i64 = undefined;
+                 var slots: [max_streams]i64 = undefined;
++                var samp: [max_streams]draft.DraftSampling = undefined;
+                 for (0..n) |i| {
+                     tokens[i] = try r.int(i64);
+                     q0[i] = try r.int(i64);
+                     slots[i] = try r.int(i64);
++                    samp[i] = .{ .seed = try r.int(u64), .temperature = @bitCast(try r.int(u32)), .top_k = try r.int(i32), .top_p = @bitCast(try r.int(u32)), .min_p = @bitCast(try r.int(u32)) };
+                 }
+-                m.pass(tokens[0..n], q0[0..n], slots[0..n], steps) catch |err| refused(err);
++                m.pass(tokens[0..n], q0[0..n], slots[0..n], steps, samp[0..n]) catch |err| refused(err);
+             },
+             .fill_images => {
+                 const count = try r.int(u32);
+diff --git a/zig/src/families/dsv41/layer_main.zig b/zig/src/families/dsv41/layer_main.zig
+index d732814..29fbab3 100644
+--- a/zig/src/families/dsv41/layer_main.zig
++++ b/zig/src/families/dsv41/layer_main.zig
+@@ -757,7 +757,7 @@ fn runRounds(run: *Run, eng: *const prompt.Engine, ch: *prompt.Chunk, caches: *c
+                 }
+             }
+             var dc: DraftCheck = .{ .run = run, .call = bp.call, .layers = c.layers, .after = bp.call, .vis = vis[0..nv] };
+-            dr.pass(eng, ch, &pool, tok, q0, sl, steps, .{ .ctx = &dc, .at = DraftCheck.at }) catch |err| {
++            dr.pass(eng, ch, &pool, tok, q0, sl, steps, .{ .ctx = &dc, .at = DraftCheck.at }, &.{}) catch |err| {
+                 if (err == error.DraftMismatch) return false;
+                 try w_out.print("{{\"rank\": {d}, \"round\": {d}, \"draft_call\": {d}, \"error\": \"{s}\"}}\n", .{ run.rank, k, bp.call, @errorName(err) });
+                 try w_out.flush();
+@@ -1243,7 +1243,7 @@ fn runDrafted(run: *Run, eng: *const prompt.Engine, ch: *prompt.Chunk, caches: *
+                 }
+             }
+             var dc: DraftCheck = .{ .run = run, .call = bp.call, .layers = c.layers, .after = bp.call, .vis = vis[0..nv] };
+-            dr.pass(eng, ch, &pool, tok[0..nd], q0[0..nd], sl[0..nd], steps, .{ .ctx = &dc, .at = DraftCheck.at }) catch |err| {
++            dr.pass(eng, ch, &pool, tok[0..nd], q0[0..nd], sl[0..nd], steps, .{ .ctx = &dc, .at = DraftCheck.at }, &.{}) catch |err| {
+                 if (err == error.DraftMismatch) return false;
+                 try w_out.print("{{\"rank\": {d}, \"draft_call\": {d}, \"error\": \"{s}\"}}\n", .{ run.rank, bp.call, @errorName(err) });
+                 try w_out.flush();
+diff --git a/zig/src/families/dsv41/model.zig b/zig/src/families/dsv41/model.zig
+index a4718cc..ad9db51 100644
+--- a/zig/src/families/dsv41/model.zig
++++ b/zig/src/families/dsv41/model.zig
+@@ -298,6 +298,12 @@ pub const Model = struct {
+         if (o.drafts) {
+             m.dpool = try draft.Pool.init(&m.eng, &m.arena, m.streams);
+             m.dr = try draft.Drafter.init(&m.eng, &m.arena, sp);
++            // coupled drafts (TF_DS_COUPLED_DRAFTS=<lambda>, e.g. 0.5; unset or 0: the argmax drafts)
++            const lam: f32 = if (std.c.getenv("TF_DS_COUPLED_DRAFTS")) |v| (std.fmt.parseFloat(f32, std.mem.span(v)) catch 0) else 0;
++            if (lam > 0 and cuda.kernels.available) {
++                m.dr.?.coupled = try draft.Coupled.load(d, cuda.kernels.dsv41_coupled, sp.world, lam);
++                std.log.info("coupled drafts: lambda {d}", .{lam});
++            }
+             if (o.graphs) {
+                 m.pgraphs = draft.PassGraphs.init(gpa);
+                 m.dr.?.graphs = &m.pgraphs.?;
+@@ -817,12 +823,12 @@ pub const Model = struct {
+ 
+     /// The drafter's batched pass for N streams: each one's pending token at position q0 in its slot (its rings hold
+     /// its positions below q0), `steps` drafts each (the drafter's drafts and confidences on the host).
+-    pub fn pass(m: *Model, tokens: []const i64, q0: []const i64, slots: []const i64, steps: usize) !void {
++    pub fn pass(m: *Model, tokens: []const i64, q0: []const i64, slots: []const i64, steps: usize, samp: []const draft.DraftSampling) !void {
+         if (m.dr == null) return error.NoDrafter;
+         const dr = &m.dr.?;
+         const pool = &m.dpool.?;
+         for (q0, slots) |q, s| pool.absorbed[@intCast(s)] = @intCast(q);
+-        try dr.pass(&m.eng, &m.ch, pool, tokens, q0, slots, steps, null);
++        try dr.pass(&m.eng, &m.ch, pool, tokens, q0, slots, steps, null, samp);
+     }
+ };
+ 
+-- 
+2.49.0
+

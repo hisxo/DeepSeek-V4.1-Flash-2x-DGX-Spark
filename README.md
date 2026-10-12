@@ -24,7 +24,7 @@ first token.
 Apply on `deepseek-v41-zig` @ `4e80f05`, without 0005 (see its row):
 
 ```
-git am patches/000[1-4]*.patch patches/000[6-9]*.patch patches/0010*.patch
+git am patches/000[1-4]*.patch patches/000[6-9]*.patch patches/001[01]*.patch
 ```
 
 With this set, replies are identical to the stock build (15/15 in the agent replay below).
@@ -41,6 +41,7 @@ With this set, replies are identical to the stock build (15/15 in the agent repl
 | 0008 | The tokenizer memoizes each text segment between added tokens (a chat turn tokenizes the whole conversation twice). A cached agent turn of 75K–100K tokens prepares in 0.03 s instead of 0.14 s. Same ids. | on |
 | 0009 | The prompt indexer reads each row block's `vis` from a 16-byte-aligned address. At ~80K tokens of context a block is an odd number of rows (409–419), and the kit's 16-byte loads then hit an 8-byte-aligned view. | on |
 | 0010 | Decode windows up to 16 rows instead of 6, so a copy from the context (an agent rewriting a file it just read) lands up to 15 tokens a round instead of 5. The sliding-window ring already keeps 16 extra slots. | on |
+| 0011 | Coupled drafts: at temperature > 0 the drafter draws each draft with the target's own keyed noise at that position (the target's top-k / top-p / min-p rule on the drafter's scores, the noise scaled by λ) instead of taking its argmax. A draft lands whenever both pick the same winner from the same noise. The target's tokens never change. | off (`TF_DS_COUPLED_DRAFTS=0.5` on both ranks) |
 
 ## Results
 
@@ -70,6 +71,24 @@ repeat a function with one fix):
 Same tokens with 6-row windows, 16-row windows and no drafts at all. Code, prose and structured requests, thinking at
 T=1 and 4 parallel streams keep their speed and their tokens, and the agent replay stays 15/15 identical to stock
 (`results/copy_windows.jsonl`, `results/agent_replay_local_patched_0010.json`).
+
+**Coupled drafts** (patch 0011, harness, thinking at T=1 with the served sampling: top-p 0.95, top-k 20; one
+stream, 768 tokens a request; `think4_t1.json`):
+
+| Request | Argmax drafts | Coupled, λ 0.5 | Gain | Tokens a round |
+|---|---:|---:|---:|---:|
+| code | 85.9 tok/s | **90.1 tok/s** | +4.9 % | 3.67 → 3.92 |
+| prose | 64.0 tok/s | 63.3 tok/s | −1.1 % | 2.23 → 2.23 |
+| structured | 92.6 tok/s | **96.2 tok/s** | +3.9 % | 3.75 → 3.99 |
+| security Q&A | 62.6 tok/s | **64.6 tok/s** | +3.2 % | 2.33 → 2.42 |
+| all four | 73.4 tok/s | **75.1 tok/s** | +2.3 % | |
+
+Same tokens with and without coupling. Rounds for the four requests by λ: 1,053 at 0 (the argmax), 1,025 at 0.3,
+1,015–1,017 at 0.5, 1,020 at 0.7, 1,021 at 1. The drafter pass costs 0.25 ms more (3.6 → 3.9 ms), and greedy
+requests skip the coupled path. Without thinking (T=1, 384 tokens each of code, prose and structured text)
+coupling costs 1.7 % (86.5 → 85.0 tok/s): it pays off on thinking, where agent turns spend their tokens. With 4
+streams, a shared round's 16 rows cap each stream's drafts and coupling changes nothing (108–110 against 109 tok/s).
+Same tokens in every run. Raw rows: `results/coupled_drafts.jsonl`.
 
 Stock, the ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and
 every gather fails, which is why the stock setup runs NCCL. With patch 0006 the ring runs at MTU 1500 within 1 % of
@@ -172,9 +191,9 @@ These measurements guide the next patches.
 - Prompt MoE kernels over 128 rows a program (bit-exact, written for this): 15-30 % slower, since most experts get
   64 rows or fewer per chunk.
 - Prefill all-gathers in row pieces on a side stream, under the mHC mixes: within noise (±1.5 %).
-- Coupled drafts at T>0 (the drafter draws with the target's own keyed Gumbel noise, sharpened by a factor λ;
-  outputs unchanged): −6 % rounds on code with thinking, nothing on prose, −1 to −2 % overall. The drafter finds the
-  target's top token, not the shape of its distribution.
+- Locking the GPU clocks at the 3,003 MHz maximum (`nvidia-smi -lgc 3003,3003`): under load the GB10 stays at
+  2.4–2.5 GHz (prefill 2,416 MHz at 79 W, decode 2,489 MHz at 65 W) with no throttle reason reported, and prefill
+  (8K / 32K / 128K: 3.57 / 13.39 / 57.25 s) and decode times do not move.
 - 4,096-row prompt chunks (patch 0005): faster cold prefill, but different replies and slower cached agent turns.
 - A round-cost table measured with the ring (the served one is 8–10 ms too high): same speed, greedy, T=1 and 4
   streams. The depth rule replaces the table with measured round times after a few rounds.
@@ -204,8 +223,6 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 Work in progress, in this repository:
 - adaptive top-k (patch 0004) at tau 0.45: +6 % decode with thinking in a first test. It changes replies, so it ships
   only if quality and security-knowledge scores hold (evals with and without thinking running);
-- coupled drafts with a pipelined kernel;
-- a bigger cache of the drafter's Markov bias rows (a miss reads 66 MB);
 - prompt kernels that give the same rows whatever the chunk, so a cached agent turn resumes exactly where the last
   one stopped instead of redoing up to 2,047 tokens.
 

@@ -1,0 +1,150 @@
+{
+ "without adaptive top-k, thinking on": {
+  "gsm8k thinking on": {
+   "n": 100,
+   "correct": 96,
+   "unparsed": 2,
+   "length_cut": 2,
+   "errors": 0,
+   "accuracy_pct": 96.0
+  },
+  "mmlu thinking on": {
+   "n": 50,
+   "correct": 47,
+   "unparsed": 1,
+   "length_cut": 1,
+   "errors": 0,
+   "accuracy_pct": 94.0
+  },
+  "cybermetric thinking on": {
+   "n": 300,
+   "correct": 282,
+   "unparsed": 8,
+   "length_cut": 8,
+   "errors": 0,
+   "accuracy_pct": 94.0
+  },
+  "mmlu_computer_security thinking on": {
+   "n": 100,
+   "correct": 85,
+   "unparsed": 7,
+   "length_cut": 7,
+   "errors": 0,
+   "accuracy_pct": 85.0
+  }
+ },
+ "tau 0.45, thinking on": {
+  "gsm8k thinking on": {
+   "n": 100,
+   "correct": 98,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 98.0
+  },
+  "mmlu thinking on": {
+   "n": 50,
+   "correct": 47,
+   "unparsed": 1,
+   "length_cut": 1,
+   "errors": 0,
+   "accuracy_pct": 94.0
+  },
+  "cybermetric thinking on": {
+   "n": 300,
+   "correct": 282,
+   "unparsed": 6,
+   "length_cut": 6,
+   "errors": 0,
+   "accuracy_pct": 94.0
+  },
+  "mmlu_computer_security thinking on": {
+   "n": 100,
+   "correct": 86,
+   "unparsed": 7,
+   "length_cut": 7,
+   "errors": 0,
+   "accuracy_pct": 86.0
+  }
+ },
+ "without adaptive top-k, thinking off": {
+  "gsm8k thinking off": {
+   "n": 300,
+   "correct": 294,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 98.0
+  },
+  "mmlu thinking off": {
+   "n": 100,
+   "correct": 88,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 88.0
+  },
+  "cybermetric thinking off": {
+   "n": 500,
+   "correct": 477,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 95.4
+  },
+  "mmlu_computer_security thinking off": {
+   "n": 100,
+   "correct": 87,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 87.0
+  }
+ },
+ "tau 0.45, thinking off": {
+  "gsm8k thinking off": {
+   "n": 300,
+   "correct": 294,
+   "unparsed": 0,
+   "length_cut": 1,
+   "errors": 0,
+   "accuracy_pct": 98.0
+  },
+  "mmlu thinking off": {
+   "n": 100,
+   "correct": 88,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 88.0
+  },
+  "cybermetric thinking off": {
+   "n": 500,
+   "correct": 477,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 95.4
+  },
+  "mmlu_computer_security thinking off": {
+   "n": 100,
+   "correct": 87,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 87.0
+  }
+ },
+ "paired": [
+  "== Qk45on-v6b vs Q0on-v6b",
+  "  cybermetric on   n  300:  94.0% ->  94.0%  same answer  97.3%  lost 2 gained 2  McNemar p 1.00",
+  "  mmlu_computer_security on   n  100:  85.0% ->  86.0%  same answer  91.0%  lost 3 gained 4  McNemar p 1.00",
+  "  gsm8k      on   n  100:  96.0% ->  98.0%  same answer  98.0%  lost 0 gained 2  McNemar p 0.50",
+  "  mmlu       on   n   50:  94.0% ->  94.0%  same answer  96.0%  lost 0 gained 0  McNemar p 1.00",
+  "== Qk45b-v6b vs Q0b-v6b",
+  "  cybermetric off  n  500:  95.4% ->  95.4%  same answer 100.0%  lost 0 gained 0  McNemar p 1.00",
+  "  mmlu_computer_security off  n  100:  87.0% ->  87.0%  same answer 100.0%  lost 0 gained 0  McNemar p 1.00",
+  "  gsm8k      off  n  300:  98.0% ->  98.0%  same answer  99.0%  lost 1 gained 1  McNemar p 1.00",
+  "  mmlu       off  n  100:  88.0% ->  88.0%  same answer 100.0%  lost 0 gained 0  McNemar p 1.00"
+ ]
+}

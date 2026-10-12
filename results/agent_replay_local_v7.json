@@ -1,0 +1,529 @@
+{
+ "args": {
+  "sessions": 3,
+  "turns": 4,
+  "base_words": 33000,
+  "tool_words": 1200,
+  "max_tokens": 96
+ },
+ "summary": {
+  "turns": 15,
+  "later_turns": 12,
+  "later_ttft_s_mean": 1.8757180174191792,
+  "later_ttft_s_max": 2.0146071910858154,
+  "later_cached_ratio": 0.9670950344147105,
+  "wall_s": 137.66850900650024
+ },
+ "rows": [
+  {
+   "ttft_s": 30.04706883430481,
+   "total_s": 31.14492177963257,
+   "text": "The cache is invalidated in the `cache` entries (e.g., `cache378`, `cache495`, `cache341`, `cache331`, `cache754`, `cache234`, `cache901`, `cache7`, `cache332`, `cache316`, `cache989`, `cache358`, `cache776`, `cache298`, `cache604`, `cache436`, `cache574`, `cache227`, `cache395`, `cache81`, `",
+   "prompt_tokens": 71536,
+   "cached_tokens": 0,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 87.96099605735668,
+     "seconds": 30.968735222,
+     "prefill_seconds": 29.888490052,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 30.031560402,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "a314b47fb21a",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 25,
+     "drafted": 77,
+     "accepted": 70,
+     "acceptance_rate": 0.9090909090909091,
+     "tokens_per_round": 3.84
+    }
+   },
+   "session": 0,
+   "turn": 0
+  },
+  {
+   "ttft_s": 33.772486209869385,
+   "total_s": 34.75765037536621,
+   "text": "I can\u2019t determine where the cache is invalidated from this source tree alone\u2014it only lists identifiers and filenames, with no code or call graph showing cache invalidation logic. To summarize it in two sentences, I\u2019d need the actual source files or a searchable codebase.",
+   "prompt_tokens": 80194,
+   "cached_tokens": 0,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 63.02495564866713,
+     "seconds": 34.567390431,
+     "prefill_seconds": 33.599319173,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 33.768017269,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "f8082c5d7e30",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 26,
+     "drafted": 68,
+     "accepted": 36,
+     "acceptance_rate": 0.5294117647058824,
+     "tokens_per_round": 2.3846153846153846
+    }
+   },
+   "session": 1,
+   "turn": 0
+  },
+  {
+   "ttft_s": 38.75226187705994,
+   "total_s": 39.962754249572754,
+   "text": "The cache is invalidated in the `cache193` entry, where a `value795` is stored alongside a `cache144` reference, indicating a cache replacement or eviction event. In summary, the invalidation occurs when the cache entry `cache193` is overwritten with a new value, effectively discarding the previous cached data.",
+   "prompt_tokens": 89038,
+   "cached_tokens": 0,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 58.6299672063078,
+     "seconds": 39.860004029,
+     "prefill_seconds": 38.665599027,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 38.750303761,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "60adccb70323",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 30,
+     "drafted": 69,
+     "accepted": 40,
+     "acceptance_rate": 0.5797101449275363,
+     "tokens_per_round": 2.3666666666666667
+    }
+   },
+   "session": 2,
+   "turn": 0
+  },
+  {
+   "ttft_s": 1.9736428260803223,
+   "total_s": 2.8478734493255615,
+   "text": "The cache is invalidated in the `cache` entries (e.g., `cache609`, `cache416`, `cache169`, `cache47`, `cache736`, `cache982`, `cache128`, `cache10`, `cache414`, `cache998`, `cache634`, `cache239`, `cache62`, `cache504`, `cache776`, `cache143`, `cache565`, `cache240`, `cache682`, `cache226`, `",
+   "prompt_tokens": 74246,
+   "cached_tokens": 71406,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 110.7569546728492,
+     "seconds": 2.742078984,
+     "prefill_seconds": 1.883672231,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.9709173,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "6aa57cd62472",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 17,
+     "drafted": 88,
+     "accepted": 78,
+     "acceptance_rate": 0.8863636363636364,
+     "tokens_per_round": 5.647058823529412
+    }
+   },
+   "session": 0,
+   "turn": 1
+  },
+  {
+   "ttft_s": 1.9425773620605469,
+   "total_s": 3.2139925956726074,
+   "text": "The grep output shows many lines containing `cache` identifiers, but it still doesn\u2019t include any actual cache-invalidation code or context\u2014just tokenized names and line matches. Based on this output alone, I can\u2019t identify where the cache is invalidated; I\u2019d need the surrounding source lines or a targeted search for invalidation calls such as `cache.delete`, `cache.clear`, `invalidate`, or similar.",
+   "prompt_tokens": 82869,
+   "cached_tokens": 80064,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 69.7587783142617,
+     "seconds": 3.107911822,
+     "prefill_seconds": 1.84594596,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.939716078,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "1cf753e7e17d",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 33,
+     "drafted": 87,
+     "accepted": 56,
+     "acceptance_rate": 0.6436781609195402,
+     "tokens_per_round": 2.696969696969697
+    }
+   },
+   "session": 1,
+   "turn": 1
+  },
+  {
+   "ttft_s": 1.9076488018035889,
+   "total_s": 2.3980813026428223,
+   "text": "The cache is invalidated in the `cache193` entry, where a `value795` is stored alongside a `cache144` reference, indicating a cache replacement or eviction event. In summary, the invalidation occurs when the cache entry `cache193` is overwritten with a new value, effectively discarding the previous cached data.",
+   "prompt_tokens": 91722,
+   "cached_tokens": 88908,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 143.56563693147092,
+     "seconds": 2.380114915,
+     "prefill_seconds": 1.892022361,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.905381162,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "60adccb70323",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 6,
+     "drafted": 67,
+     "accepted": 65,
+     "acceptance_rate": 0.9701492537313433,
+     "tokens_per_round": 11.833333333333334
+    }
+   },
+   "session": 2,
+   "turn": 1
+  },
+  {
+   "ttft_s": 1.9683606624603271,
+   "total_s": 2.8385796546936035,
+   "text": "The cache is invalidated in the `cache` entries (e.g., `cache119`, `cache615`, `cache331`, `cache115`, `cache903`, `cache650`, `cache538`, `cache820`, `cache848`, `cache717`, `cache219`, `cache251`, `cache826`, `cache458`, `cache623`, `cache959`, `cache816`, `cache930`, `cache176`, `cache438`, `",
+   "prompt_tokens": 76956,
+   "cached_tokens": 73728,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 109.46811972221282,
+     "seconds": 2.818564185,
+     "prefill_seconds": 1.950221477,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.966870014,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "828894b63126",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 17,
+     "drafted": 87,
+     "accepted": 78,
+     "acceptance_rate": 0.896551724137931,
+     "tokens_per_round": 5.647058823529412
+    }
+   },
+   "session": 0,
+   "turn": 2
+  },
+  {
+   "ttft_s": 1.775991678237915,
+   "total_s": 3.0351402759552,
+   "text": "The grep output still only shows lines containing `cache` identifiers, not the actual invalidation logic or surrounding code. From this alone, I can\u2019t determine where the cache is invalidated; I\u2019d need the full source lines or a search for invalidation operations like `cache.delete`, `cache.clear`, `invalidate`, or `cache = None`.",
+   "prompt_tokens": 85571,
+   "cached_tokens": 82738,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 59.703116271976555,
+     "seconds": 3.014146844,
+     "prefill_seconds": 1.757402555,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.77440376,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "13ec34d5f17a",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 27,
+     "drafted": 123,
+     "accepted": 49,
+     "acceptance_rate": 0.3983739837398374,
+     "tokens_per_round": 2.814814814814815
+    }
+   },
+   "session": 1,
+   "turn": 2
+  },
+  {
+   "ttft_s": 1.6963627338409424,
+   "total_s": 2.233876943588257,
+   "text": "The cache is invalidated in the `cache193` entry, where a `value795` is stored alongside a `cache144` reference, indicating a cache replacement or eviction event. In summary, the invalidation occurs when the cache entry `cache193` is overwritten with a new value, effectively discarding the previous cached data.",
+   "prompt_tokens": 94406,
+   "cached_tokens": 91592,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 131.30555045443913,
+     "seconds": 2.202759261,
+     "prefill_seconds": 1.668993587,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.693848329,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "60adccb70323",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 6,
+     "drafted": 77,
+     "accepted": 65,
+     "acceptance_rate": 0.8441558441558441,
+     "tokens_per_round": 11.833333333333334
+    }
+   },
+   "session": 2,
+   "turn": 2
+  },
+  {
+   "ttft_s": 1.87009596824646,
+   "total_s": 2.6793854236602783,
+   "text": "The cache is invalidated in the `cache` entries (e.g., `cache699`, `cache764`, `cache813`, `cache560`, `cache773`, `cache44`, `cache187`, `cache593`, `cache400`, `cache235`, `cache351`, `cache918`, `cache853`, `cache568`, `cache809`, `cache90`, `cache642`, `cache664`, `cache841`, `cache373`, `",
+   "prompt_tokens": 79666,
+   "cached_tokens": 76826,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 118.1594316280592,
+     "seconds": 2.653682969,
+     "prefill_seconds": 1.84919251,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.868494559,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "6964f45aeb42",
+     "min_rows": 2
+    },
+    "speculative": {
+     "rounds": 17,
+     "drafted": 82,
+     "accepted": 78,
+     "acceptance_rate": 0.9512195121951219,
+     "tokens_per_round": 5.647058823529412
+    }
+   },
+   "session": 0,
+   "turn": 3
+  },
+  {
+   "ttft_s": 2.0146071910858154,
+   "total_s": 2.6307637691497803,
+   "text": "The grep output still only lists lines containing `cache` identifiers, not the actual invalidation logic or surrounding code. From this alone, I can\u2019t determine where the cache is invalidated; I\u2019d need the full source lines or a search for invalidation operations like `cache.delete`, `cache.clear`, `invalidate`, or `cache = None`.",
+   "prompt_tokens": 88260,
+   "cached_tokens": 85440,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 122.90075131638135,
+     "seconds": 2.59889159,
+     "prefill_seconds": 1.987929607,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 2.012719616,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "48c3403929bf",
+     "min_rows": 3
+    },
+    "speculative": {
+     "rounds": 9,
+     "drafted": 88,
+     "accepted": 67,
+     "acceptance_rate": 0.7613636363636364,
+     "tokens_per_round": 8.444444444444445
+    }
+   },
+   "session": 1,
+   "turn": 3
+  },
+  {
+   "ttft_s": 1.8252427577972412,
+   "total_s": 2.3539187908172607,
+   "text": "The cache is invalidated in the `cache193` entry, where a `value795` is stored alongside a `cache144` reference, indicating a cache replacement or eviction event. In summary, the invalidation occurs when the cache entry `cache193` is overwritten with a new value, effectively discarding the previous cached data.",
+   "prompt_tokens": 97090,
+   "cached_tokens": 94208,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 133.59210964693776,
+     "seconds": 2.329742707,
+     "prefill_seconds": 1.80506838,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.823347762,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "60adccb70323",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 6,
+     "drafted": 78,
+     "accepted": 65,
+     "acceptance_rate": 0.8333333333333334,
+     "tokens_per_round": 11.833333333333334
+    }
+   },
+   "session": 2,
+   "turn": 3
+  },
+  {
+   "ttft_s": 1.7556509971618652,
+   "total_s": 2.635969400405884,
+   "text": "The cache is invalidated in the `cache` entries (e.g., `cache259`, `cache168`, `cache315`, `cache492`, `cache41`, `cache901`, `cache398`, `cache866`, `cache534`, `cache766`, `cache342`, `cache435`, `cache372`, `cache331`, `cache757`, `cache392`, `cache602`, `cache621`, `cache712`, `cache485`, `",
+   "prompt_tokens": 82376,
+   "cached_tokens": 79536,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 108.25572321001657,
+     "seconds": 2.607379865,
+     "prefill_seconds": 1.729181447,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.753815334,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "5c9dd4a9d77a",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 17,
+     "drafted": 90,
+     "accepted": 78,
+     "acceptance_rate": 0.8666666666666667,
+     "tokens_per_round": 5.647058823529412
+    }
+   },
+   "session": 0,
+   "turn": 4
+  },
+  {
+   "ttft_s": 1.8961784839630127,
+   "total_s": 2.508284091949463,
+   "text": "The grep output still only shows lines containing `cache` identifiers, not the actual invalidation logic or surrounding code. From this alone, I can\u2019t determine where the cache is invalidated; I\u2019d need the full source lines or a search for invalidation operations like `cache.delete`, `cache.clear`, `invalidate`, or `cache = None`.",
+   "prompt_tokens": 90949,
+   "cached_tokens": 88130,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 123.437906460453,
+     "seconds": 2.482091325,
+     "prefill_seconds": 1.873698194,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.894594767,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "13ec34d5f17a",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 7,
+     "drafted": 93,
+     "accepted": 69,
+     "acceptance_rate": 0.7419354838709677,
+     "tokens_per_round": 10.857142857142858
+    }
+   },
+   "session": 1,
+   "turn": 4
+  },
+  {
+   "ttft_s": 1.8822567462921143,
+   "total_s": 2.427316904067993,
+   "text": "The cache is invalidated in the `cache193` entry, where a `value795` is stored alongside a `cache144` reference, indicating a cache replacement or eviction event. In summary, the invalidation occurs when the cache entry `cache193` is overwritten with a new value, effectively discarding the previous cached data.",
+   "prompt_tokens": 99774,
+   "cached_tokens": 96960,
+   "server": {
+    "exact_mode": "exact",
+    "tensorfold": {
+     "enable_thinking": false,
+     "reasoning_effort": "none",
+     "engine": "lanes",
+     "tokens_per_second": 129.7763085814243,
+     "seconds": 2.391499926,
+     "prefill_seconds": 1.851171217,
+     "prefill_widths": [],
+     "prefill_raised": [],
+     "time_to_first_token": 1.879521526,
+     "sampling": "greedy",
+     "drafts": true,
+     "token_sha": "60adccb70323",
+     "min_rows": 4
+    },
+    "speculative": {
+     "rounds": 6,
+     "drafted": 78,
+     "accepted": 65,
+     "acceptance_rate": 0.8333333333333334,
+     "tokens_per_round": 11.833333333333334
+    }
+   },
+   "session": 2,
+   "turn": 4
+  }
+ ]
+}

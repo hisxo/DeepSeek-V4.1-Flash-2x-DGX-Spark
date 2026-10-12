@@ -21,33 +21,61 @@ first token.
 
 ## Patches
 
-Apply on `deepseek-v41-zig` @ `4e80f05`, without 0005 (see its row):
+Apply on `deepseek-v41-zig` @ `4e80f05`:
 
 ```
-git am patches/000[1-4]*.patch patches/000[6-9]*.patch patches/001[0-5]*.patch
+git am patches/*.patch
 ```
 
-With this set and its defaults, replies are identical to the stock build (15/15 in the agent replay below).
+Without 0005 and with the defaults, replies are identical to the stock build (15/15 in the agent replay below). The
+recommended settings add 0005, `TF_DS_TOPK_TAU=0.45` and `TF_DS_EXACT_TAIL=1`, which change rounding or skip weak
+experts: replies differ, quality and security-knowledge scores do not (Results).
 
 | Patch | Change | Default |
 |---|---|---|
 | 0001 | The prompt cache keys a request with images by the images' bytes. The same image resumes, a different image never gets a false hit, and image spans before the resume point skip the vision tower. | on |
 | 0002 | When the shared KV pool needs a kept state's rows, each rank writes its half to NVMe (O_DIRECT) instead of dropping it, and reads it back on resume. | `TF_DS_SPILL_DIR=<dir>` on both ranks (cap `TF_DS_SPILL_GIB`, default 48) |
 | 0003 | `tf-dsv41-lanes`: per-request `fix_k` and per-request round costs (a measurement tool). | tool |
-| 0004 | Adaptive top-k for the routed experts of decode windows. Experimental: quality not validated yet. | off (`TF_DS_TOPK_TAU`) |
-| 0005 | Prompt chunks of 4,096 rows instead of 2,048: cold prompts 5–7 % faster, ~2.5 GB more arena per rank. Not recommended: the prefill sums run in a different order, so replies differ from stock after a few words (0/15 identical; quality not measured), and kept states resume on a 4,096-token grid, so a cached agent turn redoes ~1,000 more tokens (+24 % time to first token). | don't apply |
+| 0004 | Adaptive top-k for the routed experts of decode windows: a routed expert whose weight is under τ × the row's top routed weight is dropped (at least 4 of the 6 kept, the rest renormalized). At τ 0.45 greedy decode is 0–15 % faster (code +15 %, prose +9 %, structured ≈) and thinking at T=1 +11 %; replies change slightly (~3 % of reasoned answers) and quality and security-knowledge scores are unchanged on 8 evals (below). | `TF_DS_TOPK_TAU=0.45` (recommended) |
+| 0005 | Prompt chunks of 4,096 rows instead of 2,048: cold prompts 5–7 % faster, ~2.5 GB more arena per rank. The prefill sums run in a different order, so replies differ from stock after a few words. Alone, kept states resume on a 4,096-token grid and a cached agent turn redoes ~1,000 more tokens (+24 % time to first token); with 0012 a turn resumes at its exact tail, and on the multi-turn security eval the 300 answers are those of 0012 alone. | with 0012 (recommended), else leave it out |
 | 0006 | The RDMA ring's queue pairs take the port's active MTU (at most 4,096). The ring then works at Ethernet MTU 1500. | on with `--rdma` |
 | 0007 | The RDMA ring picks the port's RoCE v2 IPv4 GID. Stock code uses index 5, which is empty on a usual Spark link (ours: 3), so the ring failed with `VerbsFailed`. | on with `--rdma` (`TF_DS_RDMA_GID` overrides) |
 | 0008 | The tokenizer memoizes each text segment between added tokens (a chat turn tokenizes the whole conversation twice). A cached agent turn of 75K–100K tokens prepares in 0.03 s instead of 0.14 s. Same ids. | on |
 | 0009 | The prompt indexer reads each row block's `vis` from a 16-byte-aligned address. At ~80K tokens of context a block is an odd number of rows (409–419), and the kit's 16-byte loads then hit an 8-byte-aligned view. | on |
 | 0010 | Decode windows up to 16 rows instead of 6, so a copy from the context (an agent rewriting a file it just read) lands up to 15 tokens a round instead of 5. The sliding-window ring already keeps 16 extra slots. | on |
 | 0011 | Coupled drafts: at temperature > 0 the drafter draws each draft with the target's own keyed noise at that position (the target's top-k / top-p / min-p rule on the drafter's scores, the noise scaled by λ) instead of taking its argmax. A draft lands whenever both pick the same winner from the same noise. The target's tokens never change. | off (`TF_DS_COUPLED_DRAFTS=0.5` on both ranks) |
-| 0012 | Exact tail: a prompt pass also keeps its state ~130 tokens before its end (its last chunk cut there), so the next agent turn resumes there instead of up to 2,047 tokens back. The rows past a cut round differently (the MoE gate's cuBLAS GEMM picks its split of K by the chunk's row count), so replies are not bit-identical to stock. Quality not measured yet. | off (`TF_DS_EXACT_TAIL=1` on rank 0) |
+| 0012 | Exact tail: a prompt pass also keeps its state ~130 tokens before its end (its last chunk cut there), so the next agent turn resumes there instead of up to 2,047 tokens back. The rows past a cut round differently (the MoE gate's cuBLAS GEMM picks its split of K by the chunk's row count), so replies are not bit-identical to stock. On a long-context multi-turn security eval (300 CyberMetric questions in 30 conversations over ~14K tokens of context, every turn resumed from the cache) the score is the same with and without (285 / 300, 99.3 % identical answers) and each later turn prefills 244 tokens instead of 1,434 (0.96 → 0.48 s). | `TF_DS_EXACT_TAIL=1` on rank 0 (recommended) |
 | 0013 | The drafter's Markov loop learns a bias row for each token it meets (up to n rows, ~130 KB a row on each rank) instead of recomputing it from the whole Markov head (~33 MB a rank, ~140 µs) at every miss. Same drafts. | `TF_DS_MARKOV_ROWS=4096` on both ranks |
 | 0014 | The coupled drafts' top-K scans 32 slices of the vocabulary in parallel, then merges them. Same candidates in the same order. | on with 0011 |
 | 0015 | The host sampler skips each block of 16 logits that cannot enter its candidate list (one vector compare). Same candidates; 75 → 10 µs a row. | on |
+| 0016 | Early read: a round's greedy tokens or logits go to pinned host memory right after the forward, before the drafter absorbs the round; the host waits for that copy alone and draws while the absorb runs. Same bits. | `TF_DS_EARLY_READ=1` on rank 0 |
+| 0017 | The decode round's L2 prefetch settings (delay by site, pace, budget) as variables. Starting sooner and unpaced takes 0.1 ms off a round. Same bits. | `TF_DS_PF_DELAYS=0,1000,1000 TF_DS_PF_RATE=300` on both ranks |
+| 0018 | The drafter pass prefetches its next weights into L2 the way the round does (stage by stage, then the head, then the next round's first layer). Same bits. | `TF_DS_DRAFT_PREFETCH=1` on both ranks |
 
 ## Results
+
+**Stock vs this repository** (same day, same nodes, Ethernet MTU 1500). Recommended settings: every patch above (0005
+included), the RDMA ring and `TF_DS_COUPLED_DRAFTS=0.5 TF_DS_MARKOV_ROWS=4096 TF_DS_TOPK_TAU=0.45 TF_DS_EARLY_READ=1 TF_DS_PF_DELAYS=0,1000,1000 TF_DS_PF_RATE=300 TF_DS_DRAFT_PREFETCH=1 TF_DS_EXACT_TAIL=1`.
+
+| | Stock | This repository | Gain |
+|---|---:|---:|---:|
+| code, one stream (greedy, 384 tokens) | 91.0 tok/s | **113.4 tok/s** | +25 % |
+| prose, one stream | 55.5 tok/s | **69.3 tok/s** | +25 % |
+| structured, one stream | 127.0 tok/s | **145.1 tok/s** | +14 % |
+| 2 streams, total | 72.8 tok/s | **91.5 tok/s** | +26 % |
+| 4 streams, total | 104.7 tok/s | **130.5 tok/s** | +25 % |
+| thinking at T=1 (code, prose, structured, security Q&A) | 66.7 tok/s | **85.4 tok/s** | +28 % |
+| an agent rewriting a file it just read | 114.9 tok/s | **170.3 tok/s** | +48 % |
+| cached agent turn, time to first token | 31.6 s | **1.88 s** | 17× |
+| multi-turn chat over ~14K tokens, prefill of each later turn | 0.96 s | **0.48 s** | 2× |
+
+With only the settings that keep the tokens (no 0005, `TF_DS_TOPK_TAU` or `TF_DS_EXACT_TAIL`) every reply is
+token-for-token the stock build's (thinking at T=1: 77.0 tok/s, +15 %). The three others change
+replies, not scores. Adaptive top-k (greedy; thinking on: CyberMetric 282 → 282 / 300, MMLU computer security
+85 → 86 / 100, GSM8K 96 → 98 / 100, MMLU 47 → 47 / 50; thinking off: CyberMetric 477 → 477 / 500, MMLU computer
+security 87 → 87, GSM8K 294 → 294 / 300, MMLU 88 → 88). The exact tail and 4,096-row chunks: 285 / 300 with and
+without on the multi-turn security eval. Raw rows: `results/stock_vs_v7.jsonl`, `results/evals_topk045.json`,
+`results/chain_eval.json`.
 
 **Decode** (`tensorfold-native serve`, same settings as production, greedy, 384 tokens, median of 3; MTU 9000). The
 decode all-gathers go over the engine's RDMA ring instead of NCCL (patches 0006–0007 make the ring connect on a stock
@@ -106,6 +134,15 @@ Same tokens in every run. Raw rows: `results/coupled_drafts.jsonl`.
 The drafter pass drops from 3.9 to 3.5–3.7 ms (the Markov loop from 0.81 to 0.50 ms at T=1) and a round's draws on
 the host from 0.31 to 0.12 ms. Same tokens, same rounds. Raw rows: `results/drafter_sampler.jsonl`.
 
+**Early read and L2 prefetch** (patches 0016–0018 on top of 0015, harness, one stream; `results/prefetch.jsonl`):
+
+| Requests | 0015 | + 0016 | + 0017 | + 0018 |
+|---|---:|---:|---:|---:|
+| thinking at T=1, 4 requests | 76.1 tok/s | 76.4 | 76.6 | **77.0** |
+| greedy (code, prose, structured) | 89.4 tok/s | 89.6 | | **90.0** (0017 + 0018) |
+
+Same tokens in every run. 0017 alone, a five-row round: 38.26 → 38.13 ms; a one-row round: 22.12 → 22.00 ms.
+
 Stock, the ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and
 every gather fails, which is why the stock setup runs NCCL. With patch 0006 the ring runs at MTU 1500 within 1 % of
 MTU 9000, same tokens (`results/decode_mtu1500_vs_9000.jsonl`). No MTU change needed. Patch 0007 then finds the right
@@ -130,8 +167,8 @@ Decode speed follows the text (tokens a round) more than the context: a 4-row ro
 128K and 39 ms at 512K (sparse attention). Prefill goes from 0.41 ms a token below 32K to 0.54 ms between 128K and
 512K. At 128K with the served sampling (T=1, top-p 0.95, top-k 20): 65 tok/s.
 
-**Prefill** (`tf-dsv41-lanes` harness, MTU 9000, one request at a time). Patch 0005, not recommended: the first token
-is the same, but replies then differ (the prefill sums run in another order):
+**Prefill** (`tf-dsv41-lanes` harness, MTU 9000, one request at a time). Patch 0005 (recommended with 0012): the
+first token is the same, then replies differ (the prefill sums run in another order):
 
 | Prompt | 2,048-row chunks | 4,096-row chunks | Gain |
 |---|---:|---:|---:|
@@ -154,7 +191,7 @@ sessions crowd each other out, as several agents do on the 1M pool.
 | Wall time, 15 turns | 504 s | **148 s** (3.4×) | 146 s | 143 s |
 | Replies identical to the stock build | | **15 / 15** | 0 / 15 | 1 / 15 |
 
-Raw rows: `results/agent_replay_local_{stock,patched,patched_0005,patched_0012}.json`. With 0010–0015 and the recommended settings (`TF_DS_COUPLED_DRAFTS=0.5`, `TF_DS_MARKOV_ROWS=4096`) the replay stays 15/15 identical to stock, 2.1 s mean to first token (`results/agent_replay_local_patched_0015.json`). Run from a remote client
+Raw rows: `results/agent_replay_local_{stock,patched,patched_0005,patched_0012}.json`. With 0010–0015 and the lossless settings (`TF_DS_COUPLED_DRAFTS=0.5`, `TF_DS_MARKOV_ROWS=4096`) the replay stays 15/15 identical to stock, 2.1 s mean to first token (`results/agent_replay_local_patched_0015.json`). With 0001–0018 and the recommended settings (0005 and 0012 on), cached turns take 1.88 s mean and 2.01 s max to the first token, 138 s for the 15 turns (`results/agent_replay_local_v7.json`). Run from a remote client
 over a high-latency link, each turn took 2–4 s longer: the 300–430 KB request went out on a fresh TCP connection
 every turn. Keep the agents near the server, or reuse connections.
 
@@ -210,9 +247,15 @@ These measurements guide the next patches.
 - Locking the GPU clocks at the 3,003 MHz maximum (`nvidia-smi -lgc 3003,3003`): under load the GB10 stays at
   2.4–2.5 GHz (prefill 2,416 MHz at 79 W, decode 2,489 MHz at 65 W) with no throttle reason reported, and prefill
   (8K / 32K / 128K: 3.57 / 13.39 / 57.25 s) and decode times do not move.
-- 4,096-row prompt chunks (patch 0005): faster cold prefill, but different replies and slower cached agent turns.
 - A round-cost table measured with the ring (the served one is 8–10 ms too high): same speed, greedy, T=1 and 4
   streams. The depth rule replaces the table with measured round times after a few rounds.
+- One RDMA device instead of two for the decode ring: 0.2 ms slower a five-row round. The ring's PDL off, or the
+  Sinkhorn side stream folded into the main one: no gain. A ring exchange takes ~18–23 µs inside a round against
+  ~10 µs alone; both ranks wait about as long, and delaying the L2 prefetch to leave DRAM to the NIC is slower.
+- Pinning the host threads to the Cortex-X925 cores; the compressor's small kernels on a side stream beside the
+  q GEMM: no change.
+- Recalibrating the drafter's confidences, which set how many drafts a round verifies: they already match how
+  often drafts land (predicted 0.80–0.86, landed 0.78–0.87, at T=0 and T=1).
 - More than 4 streams or 16 rows a round: the kit has no row-invariant kernels past 16 rows
   (`MissingTritonVariant`), and batching past them would change replies.
 
@@ -227,8 +270,7 @@ zig build install native -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseSafe -Dnvc
 ```
 
 Add `TF_DS_SPILL_DIR=<dir on local NVMe>` to both ranks' environment, and mount that directory into the containers.
-For sampled output (thinking at T > 0) also add `TF_DS_COUPLED_DRAFTS=0.5` and `TF_DS_MARKOV_ROWS=4096` on both ranks:
-same tokens, faster drafts.
+Recommended on both ranks: `TF_DS_COUPLED_DRAFTS=0.5 TF_DS_MARKOV_ROWS=4096 TF_DS_TOPK_TAU=0.45 TF_DS_EARLY_READ=1 TF_DS_PF_DELAYS=0,1000,1000 TF_DS_PF_RATE=300 TF_DS_DRAFT_PREFETCH=1 TF_DS_EXACT_TAIL=1`. Every one of them keeps the tokens except `TF_DS_TOPK_TAU` and `TF_DS_EXACT_TAIL` (see 0004 and 0012).
 
 ```
 python3 bench/agent_replay.py http://<head>:<port> out.json
@@ -239,13 +281,6 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 ## Next
 
 Work in progress, in this repository:
-- adaptive top-k (patch 0004) at tau 0.45: +6 % decode with thinking. It changes replies, so it ships only if quality
-  and security-knowledge scores hold. With thinking (greedy): CyberMetric 282 → 282 / 300, MMLU computer security
-  85 → 86 / 100, GSM8K 96 → 98 / 100, MMLU 47 → 47 / 50; the evals without thinking are running;
-- quality and security-knowledge evals of patch 0012 (it changes rounding, not the math), on a long-context
-  multi-turn eval: CyberMetric questions asked in 30 conversations over ~16K tokens of context, every turn resumed
-  from the prompt cache;
-- the decode round's L2 prefetch settings, and reading a round's tokens before the drafter absorbs it (same bits);
 - prompt kernels that give the same bits whatever the chunk, so 0012 keeps cached turns bit-identical to cold ones.
   The MoE gate's cuBLAS GEMM picks its split of K by the row count (always running it over 2,048 rows fixes that
   one), but other prompt kernels also change bits with the chunk.

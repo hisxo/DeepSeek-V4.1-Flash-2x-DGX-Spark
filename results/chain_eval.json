@@ -1,0 +1,54 @@
+{
+ "eval": "300 CyberMetric questions asked in 30 conversations (10 each) over ~14K tokens of MMLU law and history passages, every turn after the first resumed from the prompt cache; greedy, thinking off",
+ "variants": {
+  "2,048-row chunks, 0012 off": {
+   "n": 300,
+   "correct": 285,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 95.0,
+   "later_prefill_s_mean": 0.958,
+   "later_prefilled_tokens_mean": 1434.1,
+   "later_prompt_tokens_mean": 13722.1
+  },
+  "2,048-row chunks, TF_DS_EXACT_TAIL=1": {
+   "n": 300,
+   "correct": 285,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 95.0,
+   "later_prefill_s_mean": 0.482,
+   "later_prefilled_tokens_mean": 244.3,
+   "later_prompt_tokens_mean": 13722.1
+  },
+  "4,096-row chunks (0005), TF_DS_EXACT_TAIL=1": {
+   "n": 300,
+   "correct": 285,
+   "unparsed": 0,
+   "length_cut": 0,
+   "errors": 0,
+   "accuracy_pct": 95.0,
+   "later_prefill_s_mean": 0.484,
+   "later_prefilled_tokens_mean": 244.3,
+   "later_prompt_tokens_mean": 13722.1
+  }
+ },
+ "paired_with_first": {
+  "2,048-row chunks, TF_DS_EXACT_TAIL=1": {
+   "n": 300,
+   "identical_answers": 298,
+   "lost": 1,
+   "gained": 1,
+   "mcnemar_p": 1.0
+  },
+  "4,096-row chunks (0005), TF_DS_EXACT_TAIL=1": {
+   "n": 300,
+   "identical_answers": 298,
+   "lost": 1,
+   "gained": 1,
+   "mcnemar_p": 1.0
+  }
+ }
+}

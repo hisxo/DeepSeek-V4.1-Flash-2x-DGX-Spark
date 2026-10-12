@@ -1,0 +1,127 @@
+From b6aec192ec184660e6b467c6db4af725239345eb Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 14:32:08 +0200
+Subject: [PATCH 16/18] dsv41: TF_DS_EARLY_READ=1 copies a round's tokens or
+ logits to the host before the drafter's absorb
+
+After a round's forward, the greedy tokens (the device argmax) or the logits go to pinned host memory first, then the drafter absorbs the round's taps; the host waits for that copy's event instead of the whole stream, so its draws and the next pass's set-up run while the absorb does (the pass queues behind it in the stream). The same kernels on the same inputs in the same stream order: the same bits. Not in a profile (--profile keeps its synchronized phases). Thinking at T=1: 76.2 -> 76.4 tok/s; greedy: 13.57 -> 13.49 s for decode set b.
+---
+ zig/src/families/dsv41/lanes.zig |  6 +++--
+ zig/src/families/dsv41/model.zig | 41 +++++++++++++++++++++++++++++++-
+ 2 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index 835c90c..ed4765d 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -606,8 +606,6 @@ pub const Lanes = struct {
+         }
+         const t1 = m.now();
+         const rows = try self.built.build(gpa, &self.seqs, wins[0..windows.len]);
+-        try m.verify(rows, self.built.absorb[0..windows.len]);
+-        const t2 = m.now();
+         // every row greedy: the device's argmax (R tokens back); else the logits for the host's draws
+         var greedy = true;
+         for (windows) |w| {
+@@ -615,6 +613,10 @@ pub const Lanes = struct {
+                 greedy = false;
+             };
+         }
++        m.early_want = if (greedy) 1 else 2; // (TF_DS_EARLY_READ: copied before the absorb)
++        defer m.early_want = 0;
++        try m.verify(rows, self.built.absorb[0..windows.len]);
++        const t2 = m.now();
+         const tokens: []const u32 = if (greedy) try m.roundArgmax(rows.ids.len) else &.{};
+         const logits: []const f32 = if (greedy) &.{} else try m.roundLogits(rows.ids.len);
+         const t3 = m.now();
+diff --git a/zig/src/families/dsv41/model.zig b/zig/src/families/dsv41/model.zig
+index ad9db51..495d2cc 100644
+--- a/zig/src/families/dsv41/model.zig
++++ b/zig/src/families/dsv41/model.zig
+@@ -114,6 +114,12 @@ pub const Model = struct {
+     logits: []f32, // round.max_rows rows of logits on the host
+     amax: u64, // u32 [round.max_rows]: a round's greedy tokens on the device (roundArgmax)
+     amax_host: [round.max_rows]u32 = undefined,
++    // TF_DS_EARLY_READ: the round's tokens (1) or logits (2) the next verify copies before its absorb (early_want, set
++    // by the caller), the copy's event and pinned buffer, and what the last verify copied (early_kind)
++    early_want: u8 = 0,
++    early_kind: u8 = 0,
++    early_ev: ?cuda.Event = null,
++    early_buf: ?cuda.HostBuffer = null,
+     // the stream a fill is running: its slot and its view of the caches (its extent from base)
+     fill_slot: usize = 0,
+     // the prompt a fill's chunks come from (the caller's, set for the fill) and the thread reading the next chunk's
+@@ -346,6 +352,14 @@ pub const Model = struct {
+         m.ids64 = try a.alloc(i64, chunk_rows);
+         m.vocab = sp.world * (if (m.two) |t| t.hw[0] + t.hw[1] else m.w.head.n); // 2D: both pairs' vocabulary parts
+         m.logits = try a.alloc(f32, round.max_rows * m.vocab);
++        m.early_want = 0;
++        m.early_kind = 0;
++        m.early_ev = null;
++        m.early_buf = null;
++        if (std.c.getenv("TF_DS_EARLY_READ")) |v| if (std.mem.eql(u8, std.mem.span(v), "1")) {
++            m.early_buf = try cuda.HostBuffer.alloc(m.ctx.d, round.max_rows * m.vocab * 4);
++            m.early_ev = try cuda.Event.init(m.ctx.d, false);
++        };
+         return m;
+     }
+ 
+@@ -734,7 +748,20 @@ pub const Model = struct {
+         const e = &m.eng;
+         if (m.prof) try m.stream.synchronize(); // (the GPU idle, so the issue time shows whether the host keeps it fed)
+         const t0 = m.now();
++        m.early_kind = 0;
+         try round.forward(e, &m.rd, &m.ch, &m.caches, m.rings, if (m.eh) |*x| x else null, &.{}, rows, m.pool_cap, null, if (m.graphs) |*g| g else null);
++        if (m.early_buf != null and m.early_want != 0 and !m.prof) {
++            // the reader's copy first (TF_DS_EARLY_READ): roundArgmax / roundLogits wait for its event alone
++            const d = m.ctx.d;
++            const R = rows.ids.len;
++            const dst = m.early_buf.?.bytes.ptr;
++            if (m.early_want == 1) {
++                try m.ops.argmaxRows(m.stream, m.rd.logits, m.vocab, m.vocab, R, m.amax);
++                try d.check(d.api.cuMemcpyDtoHAsync_v2(dst, m.amax, R * 4, m.stream.handle), "cuMemcpyDtoHAsync");
++            } else try d.check(d.api.cuMemcpyDtoHAsync_v2(dst, m.rd.logits, R * m.vocab * 4, m.stream.handle), "cuMemcpyDtoHAsync");
++            try m.early_ev.?.record(m.stream);
++            m.early_kind = m.early_want;
++        }
+         if (m.prof) {
+             m.t_enqueue = m.now() - t0;
+             try m.stream.synchronize();
+@@ -765,7 +792,8 @@ pub const Model = struct {
+             }
+             if (n > 0) try dr.absorbMany(e, &m.ch, &m.dpool.?, items[0..n]);
+         }
+-        try m.stream.synchronize();
++        // an early read: the absorb runs on while the host draws (the next pass queues behind it)
++        if (m.early_kind == 0) try m.stream.synchronize();
+         if (m.prof) m.t_absorb = m.now() - t1;
+     }
+ 
+@@ -800,6 +828,12 @@ pub const Model = struct {
+     /// The round's greedy tokens, R rows (the device's argmax of the round's logits, as sampling.argmax), on the host.
+     pub fn roundArgmax(m: *Model, R: usize) ![]const u32 {
+         const d = m.ctx.d;
++        if (m.early_kind == 1) {
++            m.early_kind = 0;
++            try m.early_ev.?.synchronize();
++            @memcpy(m.amax_host[0..R], m.early_buf.?.slice(u32)[0..R]);
++            return m.amax_host[0..R];
++        }
+         try m.ops.argmaxRows(m.stream, m.rd.logits, m.vocab, m.vocab, R, m.amax);
+         try m.stream.synchronize();
+         try d.check(d.api.cuMemcpyDtoH_v2(&m.amax_host, m.amax, R * 4), "cuMemcpyDtoH");
+@@ -808,6 +842,11 @@ pub const Model = struct {
+ 
+     pub fn roundLogits(m: *Model, R: usize) ![]const f32 {
+         const d = m.ctx.d;
++        if (m.early_kind == 2) {
++            m.early_kind = 0;
++            try m.early_ev.?.synchronize();
++            return m.early_buf.?.slice(f32)[0 .. R * m.vocab];
++        }
+         try m.stream.synchronize();
+         try d.check(d.api.cuMemcpyDtoH_v2(m.logits.ptr, m.rd.logits, R * m.vocab * 4), "cuMemcpyDtoH");
+         return m.logits[0 .. R * m.vocab];
+-- 
+2.49.0
+

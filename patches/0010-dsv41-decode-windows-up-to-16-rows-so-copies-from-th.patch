@@ -1,0 +1,38 @@
+From 3575b500b0a02a2e8335f10a0e2ddc3881ac6b9c Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 08:56:17 +0200
+Subject: [PATCH] dsv41: decode windows up to 16 rows, so copies from the
+ context land up to 15 tokens a round
+
+A round verified at most 6 rows (window_rows), which capped a copy from the context (the
+lane core's suffix proposer: an agent rewriting a file it just read) at 5 tokens a round.
+The sliding-window ring keeps 16 extra slots, so a 16-row window never overwrites a key it
+reads. Copy-heavy agent edits decode 115 -> 170 tok/s (15 tokens a round instead of 6);
+replies are the same tokens as with 6-row windows and as decoding without drafts, and code,
+prose, structured and thinking requests keep their speed and tokens.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012LKX4U7yxGzgs3Ejvas9Q7
+---
+ zig/src/families/dsv41/lanes.zig | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index 9d944fb..71ad5cd 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -28,8 +28,9 @@ const Model = model.Model;
+ const max_streams = model.max_streams;
+ const max_rows = round.max_rows;
+ 
+-/// A window of the pending row and the drafter's block: the widest one the gates checked row for row.
+-pub const window_rows = 6;
++/// A window of the pending row and the drafter's block, or of a copy from the context: up to 16 rows (the sliding
++/// window ring keeps 16 extra slots, so a window never overwrites a key it reads; replies checked identical to 6-row windows).
++pub const window_rows = 16;
+ 
+ /// The image rows a fill_images frame carries at most.
+ pub const image_piece = 32 << 10;
+-- 
+2.49.0
+

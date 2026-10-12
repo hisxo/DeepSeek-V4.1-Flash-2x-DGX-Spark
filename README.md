@@ -24,7 +24,7 @@ first token.
 Apply on `deepseek-v41-zig` @ `4e80f05`, without 0005 (see its row):
 
 ```
-git am patches/000[1-4]*.patch patches/000[6-9]*.patch
+git am patches/000[1-4]*.patch patches/000[6-9]*.patch patches/0010*.patch
 ```
 
 With this set, replies are identical to the stock build (15/15 in the agent replay below).
@@ -40,6 +40,7 @@ With this set, replies are identical to the stock build (15/15 in the agent repl
 | 0007 | The RDMA ring picks the port's RoCE v2 IPv4 GID. Stock code uses index 5, which is empty on a usual Spark link (ours: 3), so the ring failed with `VerbsFailed`. | on with `--rdma` (`TF_DS_RDMA_GID` overrides) |
 | 0008 | The tokenizer memoizes each text segment between added tokens (a chat turn tokenizes the whole conversation twice). A cached agent turn of 75K–100K tokens prepares in 0.03 s instead of 0.14 s. Same ids. | on |
 | 0009 | The prompt indexer reads each row block's `vis` from a 16-byte-aligned address. At ~80K tokens of context a block is an odd number of rows (409–419), and the kit's 16-byte loads then hit an 8-byte-aligned view. | on |
+| 0010 | Decode windows up to 16 rows instead of 6, so a copy from the context (an agent rewriting a file it just read) lands up to 15 tokens a round instead of 5. The sliding-window ring already keeps 16 extra slots. | on |
 
 ## Results
 
@@ -56,6 +57,19 @@ Spark link).
 
 One gather of 1 row (20 KB) takes 9 µs on the ring against 21 µs with NCCL; a decode round does 80 of them. Engine
 harness rows (per-round costs, token hashes): `results/decode_nccl_vs_rdma.jsonl`.
+
+**Copy-heavy agent output** (patch 0010, harness, greedy; `copy.json`: rewrite a real source file with a rename, and
+repeat a function with one fix):
+
+| Request | 6-row windows | 16-row windows | Gain | Tokens a round |
+|---|---:|---:|---:|---:|
+| rename | 118.9 tok/s | **185.4 tok/s** | +56 % | 5.9 → 15.1 |
+| fix | 110.8 tok/s | **156.6 tok/s** | +41 % | 5.5 → 11.5 |
+| both | 114.9 tok/s | **170.3 tok/s** | +48 % | |
+
+Same tokens with 6-row windows, 16-row windows and no drafts at all. Code, prose and structured requests, thinking at
+T=1 and 4 parallel streams keep their speed and their tokens, and the agent replay stays 15/15 identical to stock
+(`results/copy_windows.jsonl`, `results/agent_replay_local_patched_0010.json`).
 
 Stock, the ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and
 every gather fails, which is why the stock setup runs NCCL. With patch 0006 the ring runs at MTU 1500 within 1 % of
@@ -162,6 +176,10 @@ These measurements guide the next patches.
   outputs unchanged): −6 % rounds on code with thinking, nothing on prose, −1 to −2 % overall. The drafter finds the
   target's top token, not the shape of its distribution.
 - 4,096-row prompt chunks (patch 0005): faster cold prefill, but different replies and slower cached agent turns.
+- A round-cost table measured with the ring (the served one is 8–10 ms too high): same speed, greedy, T=1 and 4
+  streams. The depth rule replaces the table with measured round times after a few rounds.
+- More than 4 streams or 16 rows a round: the kit has no row-invariant kernels past 16 rows
+  (`MissingTritonVariant`), and batching past them would change replies.
 
 ## Build and run
 
@@ -184,10 +202,12 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 ## Next
 
 Work in progress, in this repository:
-- several streams per round (4 and 8 streams), longer copy windows for code and agent output;
-- a round-cost table measured with the ring (the served one is 8-10 ms too high);
+- adaptive top-k (patch 0004) at tau 0.45: +6 % decode with thinking in a first test. It changes replies, so it ships
+  only if quality and security-knowledge scores hold (evals with and without thinking running);
+- coupled drafts with a pipelined kernel;
 - a bigger cache of the drafter's Markov bias rows (a miss reads 66 MB);
-- adaptive top-k, only if quality and security-knowledge scores hold.
+- prompt kernels that give the same rows whatever the chunk, so a cached agent turn resumes exactly where the last
+  one stopped instead of redoing up to 2,047 tokens.
 
 A decode round is already at ~90 % of DRAM bandwidth and each extra verified row costs ~4 ms, mostly new experts:
 what is left is in tokens per weight read (drafts, streams), not in kernels.

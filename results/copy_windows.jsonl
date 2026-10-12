@@ -1,0 +1,33 @@
+{"set": "copy.json (agent edits, greedy)", "windows": "6-row windows", "request": "rename", "tokens": 799, "rounds": 135, "decode_s": 6.72, "tok_s": 118.9, "rows_a_round": 5.978, "forward_ms": 46.19, "token_sha": "9dd4f97b3aaf"}
+{"set": "copy.json (agent edits, greedy)", "windows": "6-row windows", "request": "fix", "tokens": 747, "rounds": 135, "decode_s": 6.74, "tok_s": 110.8, "rows_a_round": 5.763, "forward_ms": 46.272, "token_sha": "431beb7fdf7b"}
+{"set": "copy.json (agent edits, greedy)", "windows": "6-row windows", "all": true, "tokens": 1546, "seconds": 15.0, "tok_s": 103.1}
+{"set": "copy.json (agent edits, greedy)", "windows": "16-row windows", "request": "rename", "tokens": 799, "rounds": 53, "decode_s": 4.31, "tok_s": 185.4, "rows_a_round": 15.189, "forward_ms": 77.597, "token_sha": "9dd4f97b3aaf"}
+{"set": "copy.json (agent edits, greedy)", "windows": "16-row windows", "request": "fix", "tokens": 747, "rounds": 65, "decode_s": 4.77, "tok_s": 156.6, "rows_a_round": 12.585, "forward_ms": 69.591, "token_sha": "431beb7fdf7b"}
+{"set": "copy.json (agent edits, greedy)", "windows": "16-row windows", "all": true, "tokens": 1546, "seconds": 10.61, "tok_s": 145.7}
+{"set": "copy.json (agent edits, greedy)", "windows": "no drafts", "request": "rename", "tokens": 799, "rounds": 798, "decode_s": 17.73, "tok_s": 45.1, "rows_a_round": 1.0, "forward_ms": 22.159, "token_sha": "9dd4f97b3aaf"}
+{"set": "copy.json (agent edits, greedy)", "windows": "no drafts", "request": "fix", "tokens": 747, "rounds": 746, "decode_s": 16.54, "tok_s": 45.2, "rows_a_round": 1.0, "forward_ms": 22.123, "token_sha": "431beb7fdf7b"}
+{"set": "copy.json (agent edits, greedy)", "windows": "no drafts", "all": true, "tokens": 1546, "seconds": 35.82, "tok_s": 43.2}
+{"set": "decode_b.json (greedy)", "windows": "6-row windows", "request": "code", "tokens": 384, "rounds": 89, "decode_s": 3.9, "tok_s": 98.5, "rows_a_round": 5.191, "forward_ms": 39.939, "token_sha": "c8d4d58222d7"}
+{"set": "decode_b.json (greedy)", "windows": "6-row windows", "request": "prose", "tokens": 384, "rounds": 185, "decode_s": 6.24, "tok_s": 61.5, "rows_a_round": 2.757, "forward_ms": 29.856, "token_sha": "0379c386bfe9"}
+{"set": "decode_b.json (greedy)", "windows": "6-row windows", "request": "structured", "tokens": 384, "rounds": 65, "decode_s": 2.8, "tok_s": 137.1, "rows_a_round": 5.908, "forward_ms": 39.26, "token_sha": "83178f830b95"}
+{"set": "decode_b.json (greedy)", "windows": "6-row windows", "all": true, "tokens": 1152, "seconds": 13.62, "tok_s": 84.6}
+{"set": "decode_b.json (greedy)", "windows": "16-row windows", "request": "code", "tokens": 384, "rounds": 89, "decode_s": 3.9, "tok_s": 98.5, "rows_a_round": 5.191, "forward_ms": 39.818, "token_sha": "c8d4d58222d7"}
+{"set": "decode_b.json (greedy)", "windows": "16-row windows", "request": "prose", "tokens": 384, "rounds": 185, "decode_s": 6.24, "tok_s": 61.5, "rows_a_round": 2.757, "forward_ms": 29.888, "token_sha": "0379c386bfe9"}
+{"set": "decode_b.json (greedy)", "windows": "16-row windows", "request": "structured", "tokens": 384, "rounds": 64, "decode_s": 2.77, "tok_s": 138.6, "rows_a_round": 5.984, "forward_ms": 39.323, "token_sha": "83178f830b95"}
+{"set": "decode_b.json (greedy)", "windows": "16-row windows", "all": true, "tokens": 1152, "seconds": 13.52, "tok_s": 85.2}
+{"set": "think2_t1.json (thinking, T=1)", "windows": "6-row windows", "request": "code_think", "tokens": 768, "rounds": 212, "decode_s": 9.03, "tok_s": 85.0, "rows_a_round": 4.67, "forward_ms": 38.315, "token_sha": "3362b1f55591"}
+{"set": "think2_t1.json (thinking, T=1)", "windows": "6-row windows", "request": "prose_think", "tokens": 768, "rounds": 345, "decode_s": 12.01, "tok_s": 63.9, "rows_a_round": 2.994, "forward_ms": 30.792, "token_sha": "6eaf9a982efa"}
+{"set": "think2_t1.json (thinking, T=1)", "windows": "6-row windows", "all": true, "tokens": 1536, "seconds": 21.76, "tok_s": 70.6}
+{"set": "copy.json (agent edits, greedy)", "windows": "16-row windows", "request": "code_think", "tokens": 768, "rounds": 209, "decode_s": 8.96, "tok_s": 85.7, "rows_a_round": 4.794, "forward_ms": 38.611, "token_sha": "3362b1f55591"}
+{"set": "copy.json (agent edits, greedy)", "windows": "16-row windows", "request": "prose_think", "tokens": 768, "rounds": 344, "decode_s": 12.03, "tok_s": 63.8, "rows_a_round": 3.012, "forward_ms": 30.91, "token_sha": "6eaf9a982efa"}
+{"set": "copy.json (agent edits, greedy)", "windows": "16-row windows", "all": true, "tokens": 1536, "seconds": 21.7, "tok_s": 70.8}
+{"set": "conc4.json (4 streams, greedy)", "windows": "6-row windows", "request": "code", "tokens": 384, "rounds": 99, "decode_s": 8.87, "tok_s": 43.3, "rows_a_round": 10.147, "forward_ms": 66.519, "token_sha": "c8d4d58222d7"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "6-row windows", "request": "prose", "tokens": 384, "rounds": 204, "decode_s": 13.04, "tok_s": 29.4, "rows_a_round": 2.569, "forward_ms": 29.495, "token_sha": "0379c386bfe9"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "6-row windows", "request": "structured", "tokens": 384, "rounds": 65, "decode_s": 6.17, "tok_s": 62.2, "rows_a_round": 15.185, "forward_ms": 85.25, "token_sha": "83178f830b95"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "6-row windows", "request": "cyber", "tokens": 384, "rounds": 139, "decode_s": 10.6, "tok_s": 36.2, "rows_a_round": 6.075, "forward_ms": 47.646, "token_sha": "c2bde001e405"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "6-row windows", "all": true, "tokens": 1536, "seconds": 13.55, "tok_s": 113.4}
+{"set": "conc4.json (4 streams, greedy)", "windows": "16-row windows", "request": "code", "tokens": 384, "rounds": 97, "decode_s": 8.79, "tok_s": 43.7, "rows_a_round": 10.75, "forward_ms": 69.877, "token_sha": "c8d4d58222d7"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "16-row windows", "request": "prose", "tokens": 384, "rounds": 205, "decode_s": 13.05, "tok_s": 29.4, "rows_a_round": 2.554, "forward_ms": 29.054, "token_sha": "0379c386bfe9"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "16-row windows", "request": "structured", "tokens": 384, "rounds": 65, "decode_s": 6.13, "tok_s": 62.6, "rows_a_round": 15.108, "forward_ms": 84.877, "token_sha": "83178f830b95"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "16-row windows", "request": "cyber", "tokens": 384, "rounds": 140, "decode_s": 10.65, "tok_s": 36.1, "rows_a_round": 5.884, "forward_ms": 46.954, "token_sha": "c2bde001e405"}
+{"set": "conc4.json (4 streams, greedy)", "windows": "16-row windows", "all": true, "tokens": 1536, "seconds": 13.57, "tok_s": 113.2}

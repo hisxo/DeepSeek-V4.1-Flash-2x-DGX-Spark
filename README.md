@@ -24,10 +24,10 @@ first token.
 Apply on `deepseek-v41-zig` @ `4e80f05`, without 0005 (see its row):
 
 ```
-git am patches/000[1-4]*.patch patches/000[6-9]*.patch patches/001[01]*.patch
+git am patches/000[1-4]*.patch patches/000[6-9]*.patch patches/001[0-2]*.patch
 ```
 
-With this set, replies are identical to the stock build (15/15 in the agent replay below).
+With this set and its defaults, replies are identical to the stock build (15/15 in the agent replay below).
 
 | Patch | Change | Default |
 |---|---|---|
@@ -42,6 +42,7 @@ With this set, replies are identical to the stock build (15/15 in the agent repl
 | 0009 | The prompt indexer reads each row block's `vis` from a 16-byte-aligned address. At ~80K tokens of context a block is an odd number of rows (409–419), and the kit's 16-byte loads then hit an 8-byte-aligned view. | on |
 | 0010 | Decode windows up to 16 rows instead of 6, so a copy from the context (an agent rewriting a file it just read) lands up to 15 tokens a round instead of 5. The sliding-window ring already keeps 16 extra slots. | on |
 | 0011 | Coupled drafts: at temperature > 0 the drafter draws each draft with the target's own keyed noise at that position (the target's top-k / top-p / min-p rule on the drafter's scores, the noise scaled by λ) instead of taking its argmax. A draft lands whenever both pick the same winner from the same noise. The target's tokens never change. | off (`TF_DS_COUPLED_DRAFTS=0.5` on both ranks) |
+| 0012 | Exact tail: a prompt pass also keeps its state ~130 tokens before its end (its last chunk cut there), so the next agent turn resumes there instead of up to 2,047 tokens back. The rows past a cut round differently (the MoE gate's cuBLAS GEMM picks its split of K by the chunk's row count), so replies are not bit-identical to stock. Quality not measured yet. | off (`TF_DS_EXACT_TAIL=1` on rank 0) |
 
 ## Results
 
@@ -87,7 +88,8 @@ Same tokens with and without coupling. Rounds for the four requests by λ: 1,053
 1,015–1,017 at 0.5, 1,020 at 0.7, 1,021 at 1. The drafter pass costs 0.25 ms more (3.6 → 3.9 ms), and greedy
 requests skip the coupled path. Without thinking (T=1, 384 tokens each of code, prose and structured text)
 coupling costs 1.7 % (86.5 → 85.0 tok/s): it pays off on thinking, where agent turns spend their tokens. With 4
-streams, a shared round's 16 rows cap each stream's drafts and coupling changes nothing (108–110 against 109 tok/s).
+streams, a shared round's 16 rows cap each stream's drafts and coupling changes nothing (108–110 against 109 tok/s);
+with 2 streams, 86.5 → 87.9 tok/s.
 Same tokens in every run. Raw rows: `results/coupled_drafts.jsonl`.
 
 Stock, the ring's queue pairs use a fixed 4,096-byte path MTU. At Ethernet MTU 1500 the RoCE MTU is 1,024 and
@@ -130,17 +132,17 @@ binary changes). Three sessions of 72K / 80K / 89K tokens (one carries an image)
 Every turn appends the previous reply plus ~2.7K tokens of tool output. The KV pool is 262,144 positions, so the
 sessions crowd each other out, as several agents do on the 1M pool.
 
-| | Stock | Patched (no 0005) | Patched + 0005 |
-|---|---:|---:|---:|
-| Time to first token, turns 2–5, mean | 31.6 s | **2.1 s** (15×) | 2.6 s |
-| Time to first token, turns 2–5, max | 45.6 s | **2.6 s** (17×) | 3.4 s |
-| Prompt tokens served from cache, turns 2–5 | 21 % | **96 %** | 95 % |
-| Wall time, 15 turns | 504 s | **148 s** (3.4×) | 146 s |
-| Replies identical to the stock build | | **15 / 15** | 0 / 15 |
+| | Stock | Patched (no 0005) | Patched + 0005 | Patched + 0012 on |
+|---|---:|---:|---:|---:|
+| Time to first token, turns 2–5, mean | 31.6 s | **2.1 s** (15×) | 2.6 s | **1.88 s** |
+| Time to first token, turns 2–5, max | 45.6 s | **2.6 s** (17×) | 3.4 s | **1.99 s** |
+| Prompt tokens served from cache, turns 2–5 | 21 % | **96 %** | 95 % | 97 % |
+| Wall time, 15 turns | 504 s | **148 s** (3.4×) | 146 s | 143 s |
+| Replies identical to the stock build | | **15 / 15** | 0 / 15 | 1 / 15 |
 
-Raw rows: `results/agent_replay_local_{stock,patched,patched_0005}.json`. Run from a remote client over a high-latency
-link, each turn took 2–4 s longer: the 300–430 KB request went out on a fresh TCP connection every turn. Keep the
-agents near the server, or reuse connections.
+Raw rows: `results/agent_replay_local_{stock,patched,patched_0005,patched_0012}.json`. Run from a remote client
+over a high-latency link, each turn took 2–4 s longer: the 300–430 KB request went out on a fresh TCP connection
+every turn. Keep the agents near the server, or reuse connections.
 
 **Gates**
 
@@ -223,8 +225,10 @@ python3 bench/spill_check.py http://<head>:<port>      # on a small pool, e.g. -
 Work in progress, in this repository:
 - adaptive top-k (patch 0004) at tau 0.45: +6 % decode with thinking in a first test. It changes replies, so it ships
   only if quality and security-knowledge scores hold (evals with and without thinking running);
-- prompt kernels that give the same rows whatever the chunk, so a cached agent turn resumes exactly where the last
-  one stopped instead of redoing up to 2,047 tokens.
+- quality and security-knowledge evals of patch 0012 (it changes rounding, not the math);
+- prompt kernels that give the same bits whatever the chunk, so 0012 keeps cached turns bit-identical to cold ones.
+  The MoE gate's cuBLAS GEMM picks its split of K by the row count (always running it over 2,048 rows fixes that
+  one), but other prompt kernels also change bits with the chunk.
 
 A decode round is already at ~90 % of DRAM bandwidth and each extra verified row costs ~4 ms, mostly new experts:
 what is left is in tokens per weight read (drafts, streams), not in kernels.

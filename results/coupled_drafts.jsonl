@@ -47,3 +47,5 @@
 {"set": "decode_b.json (greedy: the coupled path is skipped)", "variant": "lambda 0.5 set", "all": true, "tokens": 1152, "decode_s": 12.93, "tok_s": 89.1}
 {"set": "think4_t1.json, 4 streams at once", "variant": "argmax drafts", "all": true, "tokens": 2942, "seconds": 26.91, "tok_s": 109.3, "rounds": 366, "accepted": 1823, "drafted": 2554, "same_tokens": true}
 {"set": "think4_t1.json, 4 streams at once", "variant": "coupled, lambda 0.5", "all": true, "tokens": 2942, "seconds": 27.23, "tok_s": 108.0, "rounds": 371, "accepted": 1856, "drafted": 2505, "same_tokens": true}
+{"set": "think4_t1.json, 2 streams at once", "variant": "argmax drafts", "all": true, "tokens": 2942, "seconds": 34.03, "tok_s": 86.5, "rounds": 693, "accepted": 1861, "drafted": 2744, "same_tokens": true}
+{"set": "think4_t1.json, 2 streams at once", "variant": "coupled, lambda 0.5", "all": true, "tokens": 2942, "seconds": 33.48, "tok_s": 87.9, "rounds": 679, "accepted": 1896, "drafted": 2668, "same_tokens": true}

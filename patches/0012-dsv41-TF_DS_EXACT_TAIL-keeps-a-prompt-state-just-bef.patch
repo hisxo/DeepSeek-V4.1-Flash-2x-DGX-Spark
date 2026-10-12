@@ -1,0 +1,125 @@
+From e4c9d38e79ca16506e81ea41024cad182176d5f0 Mon Sep 17 00:00:00 2001
+From: hisxo <16657045+hisxo@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 11:49:26 +0200
+Subject: [PATCH] dsv41: TF_DS_EXACT_TAIL keeps a prompt state just before the
+ prompt's window, so the next agent turn resumes there
+
+A prompt pass keeps its state at chunk ends of the 2,048-row grid, at or before the prompt's
+replay point (its length less the 128-token window). An agent's next turn extends the same
+prompt, so it resumed on that grid and redid up to 2,047 tokens of the previous turn (1,152 in
+the median of a night of served agent turns). With TF_DS_EXACT_TAIL=1 a pass also cuts its last
+chunk (or the one before) at the last even position 130 rows or more from both ends of that
+chunk, at least 512 tokens past the grid's state, and keeps its state there instead. A pass that
+resumes off the grid goes back to the grid at the next chunk end.
+
+Pieces of 130 rows or more take the kernels of whole chunks, but some prompt kernels pick their
+algorithm by the chunk's row count (the MoE gate's cuBLAS GEMM chooses its split of K that way),
+so the rows past a cut round differently: replies are no longer bit-identical to the stock build
+(1/15 in the agent replay). Cached agent turns reach their first token in 1.88 s instead of 2.15 s
+(max 1.99 s instead of 2.67 s) on that replay; cold prompts take the same time.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012LKX4U7yxGzgs3Ejvas9Q7
+---
+ zig/src/families/dsv41/lanes.zig | 43 +++++++++++++++++++++++++++++---
+ 1 file changed, 39 insertions(+), 4 deletions(-)
+
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index e236621..835c90c 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -38,6 +38,32 @@ pub const image_piece = 32 << 10;
+ /// A gate's diagnostic (the tools' --logits-sha 1): each prompt's logits' sha256 on stderr.
+ pub var logits_sha = false;
+ 
++/// TF_DS_EXACT_TAIL=1: each prompt pass also keeps its state min_piece rows or so before its end (fineCut).
++pub var exact_tail = false;
++
++/// The rows of a piece of a cut chunk at least (1..128 rows take the grouped linears, not a whole chunk's kernels).
++const min_piece: usize = 130;
++
++/// The tokens an exact-tail state must save over the grid's last one: a cut chunk reads the layers' weights once more
++/// (~0.15 s), about what replaying 300-400 tokens costs.
++const min_gain: usize = 512;
++
++/// The exact tail's kept state for a pass over [start, len): the last even position q with min_piece rows or more
++/// on both sides within its chunk, in the prompt's last chunk or the one before, min_gain tokens or more past the
++/// grid's last kept state (null: none, the grid's state is kept). A later prompt resumes there with a first piece of min_piece rows or more (its chunk end is past q's).
++fn fineCut(start: usize, len: usize, last_end: usize) ?usize {
++    const cr = model.chunk_rows;
++    var ce = len;
++    for (0..2) |_| {
++        if (ce < start + 2 * min_piece) return null;
++        const cs = @max(start, (ce - 1) / cr * cr);
++        const q = (ce - min_piece) & ~@as(usize, 1);
++        if (q >= cs + min_piece) return if (q >= last_end + min_gain) q else null;
++        ce = cs;
++    }
++    return null;
++}
++
+ /// The primitives rank 0 sends rank 1 (each frame: kind u8, step u64, its fields little-endian).
+ pub const Kind = enum(u8) { fill_begin = 1, fill_chunk = 2, verify = 3, pass = 4, snap_save = 5, snap_restore = 6, snap_drop = 7, fill_images = 8, done = 9, snap_spill = 10, snap_fill = 11 };
+ 
+@@ -248,6 +274,7 @@ pub const Lanes = struct {
+ 
+     pub fn init(gpa: std.mem.Allocator, m: *Model) Lanes {
+         var ln: Lanes = .{ .gpa = gpa, .m = m, .peer = if (m.world > 1) m.peer() else null };
++        if (std.c.getenv("TF_DS_EXACT_TAIL")) |v| exact_tail = std.mem.eql(u8, std.mem.span(v), "1");
+         ln.spill = spill_mod.Spill.fromEnv(gpa, 0);
+         // the round costs by rows: ROUND_MS[min(rows, len) - 1] (the served table, or TF_DS_ROUND_MS)
+         const t = m.round_ms;
+@@ -489,6 +516,7 @@ pub const Lanes = struct {
+         // where this pass keeps states: the cache's marks and its last chunk end before the replay (the served lane's
+         // kept prompt), each at the chunk end at or before it
+         const last_end = @min(replay, len - 1) / model.chunk_rows * model.chunk_rows;
++        const fine: ?usize = if (exact_tail) fineCut(start, len, last_end) else null;
+         var head = false;
+         m.fill_seq = seq.items;
+         defer {
+@@ -497,7 +525,11 @@ pub const Lanes = struct {
+         }
+         while (start < len) {
+             if (start > 0 and s.isCancelled()) return error.Cancelled;
+-            const n = @min(model.chunk_rows, len - start);
++            var n: usize = @min(model.chunk_rows, len - start);
++            n = @min(n, (start / model.chunk_rows + 1) * model.chunk_rows - start); // after an off-grid resume: to the grid
++            if (fine) |q| {
++                if (start < q and q < start + n) n = q - start;
++            }
+             if (try self.begin(.fill_chunk)) {
+                 try self.wire.int(gpa, u64, start);
+                 try self.wire.int(gpa, u32, @intCast(n));
+@@ -506,7 +538,7 @@ pub const Lanes = struct {
+             }
+             head = try m.fillChunk(seq.items[0 .. start + n], start, n, replay);
+             start += n;
+-            if (s.reuse.hook) |k| if (start < len and start <= replay and (start == last_end or markEnds(s.reuse.marks, start))) k.at(k.ptr, s, @intCast(start));
++            if (s.reuse.hook) |k| if (start < len and start <= replay and ((start == last_end and fine == null) or start == (fine orelse 0) or markEnds(s.reuse.marks, start))) k.at(k.ptr, s, @intCast(start));
+         }
+         if (!head) return error.NoPromptLogits;
+         const logits = try m.promptLogitsHost();
+@@ -700,7 +732,10 @@ pub const Lanes = struct {
+     /// prompt's replay (the rows before it ran the encoder layers alone, as a fresh pass of this prompt runs them).
+     fn usable(self: *const Lanes, sn: *const Snap, len: usize) bool {
+         if (std.mem.indexOfScalar(*Snap, self.snaps.items, @constCast(sn)) == null) return false;
+-        return (!sn.stale or sn.spilled) and sn.at > 0 and sn.at < len and sn.at % model.chunk_rows == 0 and sn.at <= len -| self.m.cfg.window;
++        const on_grid = sn.at % model.chunk_rows == 0;
++        // off the grid (exact tail): even, and the resumed pass's first piece min_piece rows or more
++        const tail_ok = exact_tail and sn.at % 2 == 0 and @min((sn.at / model.chunk_rows + 1) * model.chunk_rows, len) -| sn.at >= min_piece;
++        return (!sn.stale or sn.spilled) and sn.at > 0 and sn.at < len and (on_grid or tail_ok) and sn.at <= len -| self.m.cfg.window;
+     }
+ 
+     /// The first extent that fits around the live streams and the kept states; the oldest kept states go stale
+@@ -766,7 +801,7 @@ pub const Lanes = struct {
+         const self = of(ptr);
+         const s: *const lanes.Stream = @ptrCast(@alignCast(owner orelse return error.NoStream));
+         const l = self.streams.getPtr(s) orelse return error.UnknownStream;
+-        if (at == 0 or at % model.chunk_rows != 0 or at > s.prompt_len -| self.m.cfg.window) return error.NotAChunkEnd;
++        if (at == 0 or (at % model.chunk_rows != 0 and !(exact_tail and at % 2 == 0)) or at > s.prompt_len -| self.m.cfg.window) return error.NotAChunkEnd;
+         const sn = try self.gpa.create(Snap);
+         errdefer self.gpa.destroy(sn);
+         sn.* = .{ .id = self.next_snap, .at = at, .base = l.base, .buf = try cuda.DeviceBuffer.alloc(self.m.ctx.d, self.m.snapBytes()) };
+-- 
+2.49.0
+

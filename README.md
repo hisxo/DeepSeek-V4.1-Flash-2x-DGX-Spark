@@ -245,6 +245,16 @@ GB of experts), but prefetching the next layer's hot experts into L2 wherever DR
 routing is statistically predictable; (3) a per-expert quantization budget by usage is a research option (replies
 would change).
 
+## A cached turn's time to first token is its prefill
+
+`bench/ttft_decomp.py` reads the server's counters around each request of one conversation (a ~55K-token note, then
+turns of ~1,400 new tokens): the client's time to first token, 0.91–0.99 s, is the server's to the millisecond, and
+the server's is the prompt pass (0.89–0.98 s) plus 10–40 ms of host work (parse, tokenize, cache lookup, first
+draw) and 1–3 ms of network (`results/ttft_decomp_cached_turn.json`). Nothing is left on the HTTP or host side. What
+is left is the pass itself: 1,366 new tokens take 0.9 s, 1.5K tokens/s, where a 55K prompt runs at 2.5K tokens/s —
+a small pass pays the trellis decode of nearly every expert it touches whatever its row count. On a four-agent
+workload of ~6,000 turns a day that regime is about 1.5 GPU-hours a day, the largest remaining share of prefill.
+
 ## The prompt-cache store holds 80 states, whatever their length
 
 A kept state is two things: the stream's rows in the shared compressed plane (0.85 KB a token a rank; they spill to

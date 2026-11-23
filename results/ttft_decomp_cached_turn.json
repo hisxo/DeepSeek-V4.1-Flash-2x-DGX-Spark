@@ -1,0 +1,61 @@
+{
+ "server": "v9e = v7h + patches 0019-0021/0024 (all unset), --parallel 4",
+ "conversation": "system notes ~55K tokens, then 6 user turns of ~1,366 new tokens, greedy, 8-token replies, thinking off",
+ "columns": "client_ttft_s = network + server_ttft_s; server_ttft_s = host_s + prefill_s (deltas of /metrics around each request)",
+ "turns": [
+  {
+   "turn": 0,
+   "prompt_tokens": 55372,
+   "client_ttft_s": 22.389,
+   "server_ttft_s": 22.386,
+   "prefill_s": 22.259,
+   "host_s": 0.127,
+   "net_client_s": 0.003
+  },
+  {
+   "turn": 1,
+   "prompt_tokens": 56738,
+   "client_ttft_s": 0.943,
+   "server_ttft_s": 0.942,
+   "prefill_s": 0.9,
+   "host_s": 0.042,
+   "net_client_s": 0.001
+  },
+  {
+   "turn": 2,
+   "prompt_tokens": 58102,
+   "client_ttft_s": 0.988,
+   "server_ttft_s": 0.986,
+   "prefill_s": 0.976,
+   "host_s": 0.01,
+   "net_client_s": 0.002
+  },
+  {
+   "turn": 3,
+   "prompt_tokens": 59466,
+   "client_ttft_s": 0.912,
+   "server_ttft_s": 0.909,
+   "prefill_s": 0.894,
+   "host_s": 0.015,
+   "net_client_s": 0.003
+  },
+  {
+   "turn": 4,
+   "prompt_tokens": 60830,
+   "client_ttft_s": 0.929,
+   "server_ttft_s": 0.927,
+   "prefill_s": 0.911,
+   "host_s": 0.016,
+   "net_client_s": 0.002
+  },
+  {
+   "turn": 5,
+   "prompt_tokens": 62194,
+   "client_ttft_s": 0.99,
+   "server_ttft_s": 0.988,
+   "prefill_s": 0.975,
+   "host_s": 0.013,
+   "net_client_s": 0.002
+  }
+ ]
+}

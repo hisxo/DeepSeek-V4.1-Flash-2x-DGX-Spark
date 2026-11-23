@@ -1,0 +1,170 @@
+From 729c64358ae9948e4d49feeac156c9316a973638 Mon Sep 17 00:00:00 2001
+From: hisxo <hisxo@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 23:36:32 +0100
+Subject: [PATCH 21/23] dsv41: TF_DS_ROUTE_HIST=1 counts how often each routed
+ expert is picked
+
+A diagnostic for the decode rounds' MoE: with TF_DS_ROUTE_HIST set, a
+tiny kernel after the router (and the adaptive top-k) counts each
+routed slot's expert in a per-layer histogram on the device (one atomic
+add a slot, inside the CUDA graph), and tf-dsv41-lanes prints, at the
+end of a run, every layer's share of its 8 / 32 / 64 most picked
+experts and the top eight with their counts. It writes nothing a round
+reads; unset, nothing is launched.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ zig/kernels/cuda/dsv41_ops.cu         |  9 ++++++
+ zig/src/families/dsv41/lanes_main.zig | 43 +++++++++++++++++++++++++++
+ zig/src/families/dsv41/ops.zig        | 13 ++++++++
+ zig/src/families/dsv41/round.zig      |  7 +++++
+ 4 files changed, 72 insertions(+)
+
+diff --git a/zig/kernels/cuda/dsv41_ops.cu b/zig/kernels/cuda/dsv41_ops.cu
+index fab1f66..f43bb0e 100644
+--- a/zig/kernels/cuda/dsv41_ops.cu
++++ b/zig/kernels/cuda/dsv41_ops.cu
+@@ -551,3 +551,12 @@ extern "C" __global__ void tf_ds_route_trim_kernel(int* pick, float* wts, int ro
+             if (p[q] < 0) w[q] = 0.f;
+     }
+ }
++
++// TF_DS_ROUTE_HIST: how often each routed expert is picked. One thread a (row, routed slot): the slot's expert (-1:
++// unrouted) counts once in this layer's histogram. A diagnostic; it writes nothing the round reads.
++extern "C" __global__ void tf_ds_route_hist_kernel(const int* pick, int rows, int slots, int k, unsigned int* hist) {
++    const int i = blockIdx.x * blockDim.x + threadIdx.x;
++    if (i >= rows * k) return;
++    const int e = pick[(size_t)(i / k) * slots + (i % k)];
++    if (e >= 0) atomicAdd(hist + e, 1u);
++}
+diff --git a/zig/src/families/dsv41/lanes_main.zig b/zig/src/families/dsv41/lanes_main.zig
+index de036a3..a67d80b 100644
+--- a/zig/src/families/dsv41/lanes_main.zig
++++ b/zig/src/families/dsv41/lanes_main.zig
+@@ -285,6 +285,7 @@ pub fn main(init: std.process.Init) !u8 {
+             try w.flush();
+         }
+     }
++    try printRouteHist(w, m);
+     try w.print("{{\"rank\": 0, \"requests\": {d}, \"tokens\": {d}, \"steps\": {d}, \"shared_rounds\": {d}, \"drafted\": {d}, \"accepted\": {d}, \"seconds\": {d:.2}, \"all_equal\": {}}}\n", .{ reqs.len, tokens_out, core.steps, core.shared_rounds, core.drafted, core.accepted, total_s, all_equal });
+     try w.flush();
+     return if (all_equal) 0 else 1;
+@@ -350,3 +351,45 @@ fn printClock(w: *std.Io.Writer, rank: u32, m: *const dsv41.model.Model) !void {
+     try w.print("}}}}\n", .{});
+     try w.flush();
+ }
++
++/// TF_DS_ROUTE_HIST: each layer's routed-expert histogram (every routed slot of every decode row counted), as the
++/// share of the 8 / 32 / 64 most picked experts and the top eight with their counts.
++fn printRouteHist(w: anytype, m: *dsv41.model.Model) !void {
++    const rd = &m.rd;
++    if (rd.hist == 0) return;
++    const c = m.eng.c;
++    const gpa = std.heap.page_allocator;
++    const n = c.layers * c.experts;
++    const hist = try gpa.alloc(u32, n);
++    defer gpa.free(hist);
++    try m.stream.synchronize();
++    const d = m.ctx.d;
++    try d.check(d.api.cuMemcpyDtoH_v2(hist.ptr, rd.hist, n * 4), "cuMemcpyDtoH");
++    const idx = try gpa.alloc(u32, c.experts);
++    defer gpa.free(idx);
++    const Ctx = struct {
++        row: []const u32,
++        fn less(ctx: @This(), x: u32, y: u32) bool {
++            return ctx.row[x] > ctx.row[y];
++        }
++    };
++    for (0..c.layers) |li| {
++        const row = hist[li * c.experts ..][0..c.experts];
++        var total: u64 = 0;
++        for (row) |v| total += v;
++        if (total == 0) continue;
++        for (idx, 0..) |*x, i| x.* = @intCast(i);
++        std.mem.sort(u32, idx, Ctx{ .row = row }, Ctx.less);
++        var top: [3]u64 = .{ 0, 0, 0 };
++        for (idx[0..@min(64, idx.len)], 0..) |x, i| {
++            if (i < 8) top[0] += row[x];
++            if (i < 32) top[1] += row[x];
++            top[2] += row[x];
++        }
++        const t: f64 = @floatFromInt(total);
++        try w.print("{{\"rank\": 0, \"route_hist\": {{\"layer\": {d}, \"slots\": {d}, \"top8\": {d:.3}, \"top32\": {d:.3}, \"top64\": {d:.3}, \"top\": [", .{ li, total, @as(f64, @floatFromInt(top[0])) / t, @as(f64, @floatFromInt(top[1])) / t, @as(f64, @floatFromInt(top[2])) / t });
++        for (idx[0..@min(8, idx.len)], 0..) |x, i| try w.print("{s}[{d}, {d}]", .{ if (i == 0) "" else ", ", x, row[x] });
++        try w.print("]}}}}\n", .{});
++    }
++    try w.flush();
++}
+diff --git a/zig/src/families/dsv41/ops.zig b/zig/src/families/dsv41/ops.zig
+index 04b80dd..5f2599b 100644
+--- a/zig/src/families/dsv41/ops.zig
++++ b/zig/src/families/dsv41/ops.zig
+@@ -38,6 +38,7 @@ pub const Ops = struct {
+     argmax_rows: cuda.Function,
+     gpu_clock: cuda.Function,
+     route_trim: cuda.Function,
++    route_hist: cuda.Function,
+ 
+     /// The three images (cuda.kernels.torch_pointwise, torch_movement and dsv41_ops, or the fatbins' bytes).
+     pub fn load(d: *const cuda.Driver, pointwise: []const u8, movement: []const u8, family: []const u8) !Ops {
+@@ -70,6 +71,7 @@ pub const Ops = struct {
+             .argmax_rows = try fm.function("tf_ds_argmax_rows_kernel"),
+             .gpu_clock = try fm.function("tf_ds_clock_kernel"),
+             .route_trim = try fm.function("tf_ds_route_trim_kernel"),
++            .route_hist = try fm.function("tf_ds_route_hist_kernel"),
+         };
+     }
+ 
+@@ -318,6 +320,17 @@ pub const Ops = struct {
+         try go(o.route_trim, s, (rows + 63) / 64, 64, &a);
+     }
+ 
++    /// TF_DS_ROUTE_HIST (tf_ds_route_hist_kernel): each routed slot's expert counted once in `hist` (uint32 [experts]).
++    pub fn routeHist(o: *const Ops, s: cuda.Stream, pick: u64, rows: usize, slots: usize, k: usize, hist: u64) !void {
++        var a: cuda.Args = .{};
++        a.add(pick);
++        a.add(@as(c_int, @intCast(rows)));
++        a.add(@as(c_int, @intCast(slots)));
++        a.add(@as(c_int, @intCast(k)));
++        a.add(hist);
++        try go(o.route_hist, s, (rows * k + 63) / 64, 64, &a);
++    }
++
+     /// dst row i = src row idx[i] (int64 indices, rows of `bytes` bytes); an index outside [0, src_rows) sets the
+     /// caller's zeroed uint32 flag `invalid` and leaves that row as it was.
+     pub fn gatherRows(o: *const Ops, s: cuda.Stream, src: u64, src_rows: usize, idx: u64, dst: u64, bytes: usize, rows: usize, invalid: u64) !void {
+diff --git a/zig/src/families/dsv41/round.zig b/zig/src/families/dsv41/round.zig
+index 412e567..ca70fd0 100644
+--- a/zig/src/families/dsv41/round.zig
++++ b/zig/src/families/dsv41/round.zig
+@@ -164,6 +164,7 @@ pub const Round = struct {
+     mw: u64, // fp32 [R, slots]
+     pm: u64, // fp32 [R, D]
+     gm: u64, // fp32 [world, R, D]
++    hist: u64 = 0, // TF_DS_ROUTE_HIST: uint32 [layers, experts], how often each routed expert was picked (0: off)
+     // Engram
+     e_in: u64, // bf16 [R, cols * engram_head_dim]: the rows read for this rank's hash columns
+     ek: u64, // fp32 [R, engram_wkv.n]
+@@ -286,6 +287,11 @@ pub const Round = struct {
+         rd.mw = try a.take(R * e.slots() * 4);
+         rd.pm = try a.take(R * d * 4);
+         rd.gm = try a.take(e.world * R * d * 4);
++        if (std.c.getenv("TF_DS_ROUTE_HIST") != null) {
++            const bytes = c.layers * c.experts * 4;
++            rd.hist = try a.take(bytes);
++            try e.d.check(e.d.api.cuMemsetD8Async(rd.hist, 0, bytes, e.s.handle), "cuMemsetD8Async");
++        }
+         rd.e_in = 0;
+         rd.ek = 0;
+         rd.ekg = 0;
+@@ -744,6 +750,7 @@ fn moe(e: *const Engine, rd: *Round, ch: *const Chunk, li: usize) !void {
+     const kc = try tri_norm.rowmmGate(e.t, rd.x, c.hidden, lay.gate_w, rd.gl, R, c.hidden, c.experts);
+     try tri_norm.route(e.t, rd.gl, kc, lay.gate_b, c.top_k, c.routed_scaling, lay.experts.count - 1, rd.pick, rd.mw, R, c.experts, sl);
+     if (e.topk_tau > 0) try e.ops.routeTrim(e.s, rd.pick, rd.mw, R, sl, c.top_k, e.topk_tau, e.topk_min, e.topk_renorm);
++    if (rd.hist != 0) try e.ops.routeHist(e.s, rd.pick, R, sl, c.top_k, rd.hist + li * c.experts * 4);
+     try rd.mark(e, .m_rt);
+     if (e.two) |tw| {
+         // 2D (round2d.experts, the profile's marks between): gate / up, the intermediate's exchange, down
+-- 
+2.49.0
+

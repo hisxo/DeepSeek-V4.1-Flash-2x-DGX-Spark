@@ -53,6 +53,7 @@ experts: replies differ, quality and security-knowledge scores do not (Results).
 | 0018 | The drafter pass prefetches its next weights into L2 the way the round does (stage by stage, then the head, then the next round's first layer). Same bits. | `TF_DS_DRAFT_PREFETCH=1` on both ranks |
 | 0019 | `TF_PC_TRACE=1`: the prompt-cache store logs, at each miss, the kept state sharing the longest prefix with the prompt (and whether a whole state matched yet was not resumed), and at each eviction the victim and why. Tells a prompt the client rewrote from a state the store let go. | off |
 | 0020 | `TF_DS_PF_YIELD=N`: between two chunks of a prompt pass the lane host runs up to N decode rounds for the streams already live and sends their tokens, so a long prompt no longer freezes them. Same replies; the GPU is shared, so the prompt's first token comes later by the rounds' time (a fairness setting, not a speedup; see below). | off |
+| 0021 | `TF_DS_ROUTE_HIST=1`: a per-layer histogram of the routed experts (one atomic add a slot, inside the graph), printed by `tf-dsv41-lanes` at the end of a run. Free (same speed, same tokens). | off |
 
 ## Results
 
@@ -227,6 +228,22 @@ ranks ≈ 1.5 GB a rank, 6.5 ms at DRAM speed, 3.5 ms measured, so rows already 
 raises it at run time, but the kit has no kernel variants past 16 rows (`MissingTritonVariant` at 24 or 32), and a
 round-cost model (20 ms + 3.5 ms a row against ~0.5 extra tokens a row at these acceptance rates) predicts no gain
 from wider rounds anyway.
+
+## Expert routing is concentrated
+
+`TF_DS_ROUTE_HIST=1` (patch 0021) counted every routed slot of the 8-lane thinking run above (449 rounds, ~28K slots a
+layer, `results/route_hist_thinking.jsonl`). Of the 384 routed experts of a layer, the 8 most picked take 11–35 % of
+the slots (median 25 %), the 32 most picked 31–60 % (median 51 %), the 64 most picked 49–75 % (median 68 %); a
+uniform router would give 2 %, 8 % and 17 %. The decoder layers (20–39) are the most concentrated (top 8: 23–35 %),
+and the hottest single expert of a layer takes up to 12.7 % of its slots.
+
+What follows from it: (1) the rows an expert gets in a prompt chunk are very unequal — hot experts see ~900 rows of a
+4,096-row chunk, cold ones a handful — so the right 128-row expert kernel is a hybrid dispatch (experts with 128 rows
+or more take the 128-row program, the rest the kit's 64-row one), not a global switch; (2) in decode, the 3.5 ms a row
+already reflects ~45 % expert overlap between rows; pinning hot experts in the 24 MB L2 cannot pay (a round reads 4–5
+GB of experts), but prefetching the next layer's hot experts into L2 wherever DRAM is idle is now possible, since the
+routing is statistically predictable; (3) a per-expert quantization budget by usage is a research option (replies
+would change).
 
 ## The prompt-cache store holds 80 states, whatever their length
 

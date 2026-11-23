@@ -1,7 +1,7 @@
-From 729c64358ae9948e4d49feeac156c9316a973638 Mon Sep 17 00:00:00 2001
+From b3e60a86c086f64e2fd297f4dac9e06778ffe845 Mon Sep 17 00:00:00 2001
 From: hisxo <hisxo@users.noreply.github.com>
-Date: Mon, 23 Nov 2026 23:36:32 +0100
-Subject: [PATCH 21/23] dsv41: TF_DS_ROUTE_HIST=1 counts how often each routed
+Date: Mon, 23 Nov 2026 23:53:12 +0100
+Subject: [PATCH 21/24] dsv41: TF_DS_ROUTE_HIST=1 counts how often each routed
  expert is picked
 
 A diagnostic for the decode rounds' MoE: with TF_DS_ROUTE_HIST set, a
@@ -10,15 +10,16 @@ routed slot's expert in a per-layer histogram on the device (one atomic
 add a slot, inside the CUDA graph), and tf-dsv41-lanes prints, at the
 end of a run, every layer's share of its 8 / 32 / 64 most picked
 experts and the top eight with their counts. It writes nothing a round
-reads; unset, nothing is launched.
+reads; unset, nothing is launched (Round.init starts from `undefined`,
+so the histogram pointer is set to 0 there explicitly).
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---
  zig/kernels/cuda/dsv41_ops.cu         |  9 ++++++
  zig/src/families/dsv41/lanes_main.zig | 43 +++++++++++++++++++++++++++
  zig/src/families/dsv41/ops.zig        | 13 ++++++++
- zig/src/families/dsv41/round.zig      |  7 +++++
- 4 files changed, 72 insertions(+)
+ zig/src/families/dsv41/round.zig      |  8 +++++
+ 4 files changed, 73 insertions(+)
 
 diff --git a/zig/kernels/cuda/dsv41_ops.cu b/zig/kernels/cuda/dsv41_ops.cu
 index fab1f66..f43bb0e 100644
@@ -134,7 +135,7 @@ index 04b80dd..5f2599b 100644
      /// caller's zeroed uint32 flag `invalid` and leaves that row as it was.
      pub fn gatherRows(o: *const Ops, s: cuda.Stream, src: u64, src_rows: usize, idx: u64, dst: u64, bytes: usize, rows: usize, invalid: u64) !void {
 diff --git a/zig/src/families/dsv41/round.zig b/zig/src/families/dsv41/round.zig
-index 412e567..ca70fd0 100644
+index 412e567..825134d 100644
 --- a/zig/src/families/dsv41/round.zig
 +++ b/zig/src/families/dsv41/round.zig
 @@ -164,6 +164,7 @@ pub const Round = struct {
@@ -145,7 +146,15 @@ index 412e567..ca70fd0 100644
      // Engram
      e_in: u64, // bf16 [R, cols * engram_head_dim]: the rows read for this rank's hash columns
      ek: u64, // fp32 [R, engram_wkv.n]
-@@ -286,6 +287,11 @@ pub const Round = struct {
+@@ -210,6 +211,7 @@ pub const Round = struct {
+         const l0 = w.layers[0];
+         const nb_max = bucketFor(pool_cap, pool_cap);
+         var rd: Round = undefined;
++        rd.hist = 0; // `undefined` above: the struct's field defaults do not apply
+         rd.r = 0;
+         // the profile's clocks off until Model.useClock (rd starts undefined: a field default does not apply)
+         rd.launches = @splat(0);
+@@ -286,6 +288,11 @@ pub const Round = struct {
          rd.mw = try a.take(R * e.slots() * 4);
          rd.pm = try a.take(R * d * 4);
          rd.gm = try a.take(e.world * R * d * 4);
@@ -157,7 +166,7 @@ index 412e567..ca70fd0 100644
          rd.e_in = 0;
          rd.ek = 0;
          rd.ekg = 0;
-@@ -744,6 +750,7 @@ fn moe(e: *const Engine, rd: *Round, ch: *const Chunk, li: usize) !void {
+@@ -744,6 +751,7 @@ fn moe(e: *const Engine, rd: *Round, ch: *const Chunk, li: usize) !void {
      const kc = try tri_norm.rowmmGate(e.t, rd.x, c.hidden, lay.gate_w, rd.gl, R, c.hidden, c.experts);
      try tri_norm.route(e.t, rd.gl, kc, lay.gate_b, c.top_k, c.routed_scaling, lay.experts.count - 1, rd.pick, rd.mw, R, c.experts, sl);
      if (e.topk_tau > 0) try e.ops.routeTrim(e.s, rd.pick, rd.mw, R, sl, c.top_k, e.topk_tau, e.topk_min, e.topk_renorm);

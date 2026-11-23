@@ -221,7 +221,12 @@ weights, the recommended settings), `results/lane_scaling_thinking.jsonl`:
 | 6 | **138.5 tok/s** | ~23 | 71.2 ms | 10.4 | 75 % |
 | 8 | **146.9 tok/s** | ~22 | 77.7 ms | 12.1 | 80 % |
 
-Every request's tokens (sha of the reply) are identical at 1, 4, 6 and 8 lanes. A round costs about 20 ms plus
+Every request's tokens (sha of the reply) are identical at 1, 4, 6 and 8 lanes.
+
+To serve more than 4 lanes the pool needs as many slots as lanes on both ranks: `TF_DS_STREAMS=N` for the server
+(rank 0) and `--streams N` for `tf-dsv41-lanes` (rank 1), the model's default being 4 whatever `--parallel` says —
+without them the fifth concurrent request is refused (measured: 2 of 6 and 4 of 8 streams fail with `--parallel 8`
+alone; all pass at 4). A round costs about 20 ms plus
 3.5 ms a row: one more row reads its own six experts in every layer (6 × 3 × 5120 × 2304 × 2.9 bits × 40 layers / 2
 ranks ≈ 1.5 GB a rank, 6.5 ms at DRAM speed, 3.5 ms measured, so rows already share about half their experts). The
 16-row round cap binds at 8 lanes (8 pending rows + 8 drafts), which is why the aggregate flattens; `TF_DS_ROUND_ROWS`

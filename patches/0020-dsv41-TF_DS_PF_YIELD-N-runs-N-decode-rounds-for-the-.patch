@@ -1,0 +1,184 @@
+From 60b3911b17cf472621084cd991be493f83410abe Mon Sep 17 00:00:00 2001
+From: hisxo <hisxo@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 22:59:46 +0100
+Subject: [PATCH 20/20] dsv41: TF_DS_PF_YIELD=N runs N decode rounds for the
+ live streams between a prompt's chunks
+
+A prompt pass ran to its end before any other stream got a round: a
+100K-token prompt (~45 s) froze every other stream for that long. With
+TF_DS_PF_YIELD=N the lane host, between two chunks of a prompt pass,
+runs up to N rounds for the streams already live and sends their
+tokens, then the pass goes on. The computations are the same in another
+order (a chunk's state between chunks lives in the stream's extent and
+slot, which a round never touches), so every reply is the same.
+
+This is a fairness setting, not a speedup: the GPU is the shared
+resource, so the rounds' time is added to the prompt's. Measured with
+three greedy streams of 1,536 tokens and a 32K prompt sent 3 s after
+them: the prompt's first token at 13.0 s (N unset), 15.9 s (N=4),
+20.6 s (N=12); the three streams get 1, 33 and 97 rounds meanwhile
+instead of freezing; the wall time of all four is the same within 1 %
+(42.6-43.1 s); every reply is byte-identical in the three settings.
+
+The fill_chunk frame carries one more byte, whether chunks follow, so
+rank 1 keeps the fill's ids through the rounds between them (its
+Engram read-ahead of the next chunk is joined before a round on both
+ranks). Cancels wait for the pass as before. The default (unset) keeps
+the old order.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ zig/src/core/lane_host.zig       | 29 ++++++++++++++++++++++++++++-
+ zig/src/core/lanes/stream.zig    | 10 ++++++++++
+ zig/src/families/dsv41/lanes.zig | 10 +++++++++-
+ 3 files changed, 47 insertions(+), 2 deletions(-)
+
+diff --git a/zig/src/core/lane_host.zig b/zig/src/core/lane_host.zig
+index 85c64d4..78cf92e 100644
+--- a/zig/src/core/lane_host.zig
++++ b/zig/src/core/lane_host.zig
+@@ -44,6 +44,9 @@ pub const LaneHost = struct {
+     // the request at the queue's front waits for room in the backend's pool (its prompt pass refused ContextFull while
+     // other streams ran): admitted again once fewer than this many streams are active
+     full_wait: ?usize = null,
++    // TF_DS_PF_YIELD=N: between a prompt pass's chunks, up to N decode rounds for the streams already live, their tokens
++    // delivered, so a long prompt does not freeze them (0: a prompt pass runs to its end first, as before)
++    yield_rounds: usize = 0,
+ 
+     const Mark = struct { at: i96, tokens: u64 };
+     const window_ns: i96 = 2 * std.time.ns_per_s;
+@@ -93,7 +96,30 @@ pub const LaneHost = struct {
+     pub fn init(gpa: Allocator, io: std.Io, core: *lanes.Engine, info_: Info) LaneHost {
+         var enforced = info_;
+         enforced.loop_guard = true;
+-        return .{ .gpa = gpa, .io = io, .core = core, .info_ = enforced };
++        var h: LaneHost = .{ .gpa = gpa, .io = io, .core = core, .info_ = enforced };
++        if (std.c.getenv("TF_DS_PF_YIELD")) |v| h.yield_rounds = std.fmt.parseInt(usize, std.mem.span(v), 10) catch 0;
++        return h;
++    }
++
++    /// Between a prompt pass's chunks (its stream not live yet): up to `yield_rounds` rounds for the live streams, their
++    /// new tokens sent. Cancels wait for the pass (its own checks each chunk); a round's error is left to the main loop.
++    fn yieldFn(ptr: *anyopaque, s: *lanes.Stream) void {
++        const h: *LaneHost = @ptrCast(@alignCast(ptr));
++        _ = s;
++        var k: usize = 0;
++        while (k < h.yield_rounds and h.core.activeCount() > 0) : (k += 1) {
++            h.core.step() catch return;
++            var i: usize = 0;
++            while (i < h.admitted.items.len) {
++                const job = h.admitted.items[i];
++                if (job.started and job.prefilled != null and h.deliver(job)) {
++                    h.lock();
++                    _ = h.admitted.orderedRemove(i);
++                    h.unlock();
++                } else i += 1;
++            }
++        }
++        h.noteLive();
+     }
+ 
+     pub fn start(h: *LaneHost) !void {
+@@ -339,6 +365,7 @@ pub const LaneHost = struct {
+             .loop_guard = r.loop_guard,
+             .chunks = r.chunks,
+             .reuse = reuse,
++            .yield = if (h.yield_rounds > 0) .{ .ptr = h, .call = yieldFn } else null,
+             .images = r.images,
+         }) catch {
+             job.proposer.deinit();
+diff --git a/zig/src/core/lanes/stream.zig b/zig/src/core/lanes/stream.zig
+index 1d6ba84..3002774 100644
+--- a/zig/src/core/lanes/stream.zig
++++ b/zig/src/core/lanes/stream.zig
+@@ -88,6 +88,13 @@ pub const MarkHook = struct {
+     at: *const fn (ptr: *anyopaque, s: *Stream, at: u32) void,
+ };
+ 
++/// Called between prompt chunks when more follow: the host may run decode rounds for the streams already live before
++/// the next chunk, so a long prompt does not freeze them (the pass's own stream is not live yet).
++pub const YieldHook = struct {
++    ptr: *anyopaque,
++    call: *const fn (ptr: *anyopaque, s: *Stream) void,
++};
++
+ /// Drafts the backend holds for the stream's next round; a tree keeps its tokens and parents on the host.
+ pub const Held = struct {
+     count: u32,
+@@ -135,6 +142,7 @@ pub const Spec = struct {
+     loop_guard: bool = false,
+     chunks: []const u32 = &.{}, // where prefill chunks start after 0 (Python's PrefillPlan); empty: the backend's step
+     reuse: Reuse = .{},
++    yield: ?YieldHook = null,
+     images: []const Image = &.{}, // in prompt order; the caller's until the stream is released
+ };
+ 
+@@ -156,6 +164,7 @@ pub const Stream = struct {
+     loop_period: ?u32 = null,
+     chunks: []const u32,
+     reuse: Reuse = .{},
++    yield: ?YieldHook = null,
+     images: []const Image = &.{},
+     cached: u32 = 0, // prompt tokens the backend restored from `reuse` (its prompt pass started there)
+     reuse_failed: bool = false, // the backend's restore of `reuse` failed: it prefilled from 0
+@@ -209,6 +218,7 @@ pub const Stream = struct {
+             .loop_guard = spec.loop_guard,
+             .chunks = spec.chunks,
+             .reuse = spec.reuse,
++            .yield = spec.yield,
+             .images = spec.images,
+         };
+         try s.context.appendSlice(gpa, spec.prompt);
+diff --git a/zig/src/families/dsv41/lanes.zig b/zig/src/families/dsv41/lanes.zig
+index 9b470a8..4b99eba 100644
+--- a/zig/src/families/dsv41/lanes.zig
++++ b/zig/src/families/dsv41/lanes.zig
+@@ -538,11 +538,16 @@ pub const Lanes = struct {
+                 try self.wire.int(gpa, u64, start);
+                 try self.wire.int(gpa, u32, @intCast(n));
+                 try self.wire.int(gpa, u64, replay);
++                try self.wire.int(gpa, u8, @intFromBool(start + n < len)); // more chunks follow: rounds may come between
+                 try self.flush();
+             }
+             head = try m.fillChunk(seq.items[0 .. start + n], start, n, replay);
+             start += n;
+             if (s.reuse.hook) |k| if (start < len and start <= replay and ((start == last_end and fine == null) or start == (fine orelse 0) or markEnds(s.reuse.marks, start))) k.at(k.ptr, s, @intCast(start));
++            if (start < len) if (s.yield) |y| {
++                m.joinAhead(); // the next chunk's Engram read-ahead ends before other streams' rounds use the reader
++                y.call(y.ptr, s);
++            };
+         }
+         if (!head) return error.NoPromptLogits;
+         const logits = try m.promptLogitsHost();
+@@ -903,6 +908,7 @@ pub fn follow(gpa: std.mem.Allocator, m: *Model) !void {
+     var built: Built = .{};
+     var step: u64 = 0;
+     var slot: usize = 0;
++    var fill_more = false; // the fill at `slot` has chunks to come: rank 0 may send other streams' rounds between them
+     var img_rows: std.ArrayList(u8) = .empty; // a prompt's image rows as their pieces come
+     defer img_rows.deinit(gpa);
+     var kept: std.AutoHashMapUnmanaged(u64, cuda.DeviceBuffer) = .empty; // rank 0's kept states, this rank's part
+@@ -936,10 +942,11 @@ pub fn follow(gpa: std.mem.Allocator, m: *Model) !void {
+         // a chunk's read-ahead of the next is done before anything but that chunk (a prompt's ids may change)
+         if (kind != .fill_chunk and kind != .snap_save and kind != .snap_restore and kind != .fill_images and kind != .snap_spill and kind != .snap_fill) {
+             m.joinAhead();
+-            m.fill_seq = &.{};
++            if (!fill_more or kind == .fill_begin or kind == .done) m.fill_seq = &.{}; // a fill's ids stay through the rounds between its chunks
+         }
+         switch (kind) {
+             .fill_begin => {
++                fill_more = false;
+                 slot = try r.int(u32);
+                 const base = try r.int(u64);
+                 if (slot >= max_streams) return error.BadSlot;
+@@ -952,6 +959,7 @@ pub fn follow(gpa: std.mem.Allocator, m: *Model) !void {
+                 const start: usize = @intCast(try r.int(u64));
+                 const n: usize = try r.int(u32);
+                 const replay: usize = @intCast(try r.int(u64));
++                fill_more = (r.int(u8) catch 0) != 0;
+                 if (start + n > seqs[slot].items.len) return error.BadChunk;
+                 _ = m.fillChunk(seqs[slot].items[0 .. start + n], start, n, replay) catch |err| refused(err);
+             },
+-- 
+2.49.0
+

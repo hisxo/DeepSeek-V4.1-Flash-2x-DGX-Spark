@@ -51,6 +51,8 @@ experts: replies differ, quality and security-knowledge scores do not (Results).
 | 0016 | Early read: a round's greedy tokens or logits go to pinned host memory right after the forward, before the drafter absorbs the round; the host waits for that copy alone and draws while the absorb runs. Same bits. | `TF_DS_EARLY_READ=1` on rank 0 |
 | 0017 | The decode round's L2 prefetch settings (delay by site, pace, budget) as variables. Starting sooner and unpaced takes 0.1 ms off a round. Same bits. | `TF_DS_PF_DELAYS=0,1000,1000 TF_DS_PF_RATE=300` on both ranks |
 | 0018 | The drafter pass prefetches its next weights into L2 the way the round does (stage by stage, then the head, then the next round's first layer). Same bits. | `TF_DS_DRAFT_PREFETCH=1` on both ranks |
+| 0019 | `TF_PC_TRACE=1`: the prompt-cache store logs, at each miss, the kept state sharing the longest prefix with the prompt (and whether a whole state matched yet was not resumed), and at each eviction the victim and why. Tells a prompt the client rewrote from a state the store let go. | off |
+| 0020 | `TF_DS_PF_YIELD=N`: between two chunks of a prompt pass the lane host runs up to N decode rounds for the streams already live and sends their tokens, so a long prompt no longer freezes them. Same replies; the GPU is shared, so the prompt's first token comes later by the rounds' time (a fairness setting, not a speedup; see below). | off |
 
 ## Results
 
@@ -204,6 +206,52 @@ every turn. Keep the agents near the server, or reuse connections.
   (first send 43 s) with the same reply. A 90K-token state is 76 MiB on disk, written in 22–62 ms and read back in
   11–22 ms. The stock build drops the evicted state, so its resend prefills from scratch.
 
+## More lanes (November 2026)
+
+The served build takes `--parallel` up to 16 (the pool has 16 slots) and keeps every reply the same: each row is
+drawn with its stream's key at its own position, whatever the round's composition. Thinking at T=1 (the agent
+workload: four to eight distinct prompts, 433–768 tokens each, `tf-dsv41-lanes --streams N --parallel N`, EAQ 2.9 bpw
+weights, the recommended settings), `results/lane_scaling_thinking.jsonl`:
+
+| Lanes | Aggregate | Per stream | Round | Tokens a round | Drafts landed |
+|---:|---:|---:|---:|---:|---:|
+| 1 (one after another) | 77.6 tok/s | 77.6 | 33.1 ms | 2.65 | 64 % |
+| 4 | **124.8 tok/s** | ~31 | 59.4 ms | 7.8 | 73 % |
+| 6 | **138.5 tok/s** | ~23 | 71.2 ms | 10.4 | 75 % |
+| 8 | **146.9 tok/s** | ~22 | 77.7 ms | 12.1 | 80 % |
+
+Every request's tokens (sha of the reply) are identical at 1, 4, 6 and 8 lanes. A round costs about 20 ms plus
+3.5 ms a row: one more row reads its own six experts in every layer (6 × 3 × 5120 × 2304 × 2.9 bits × 40 layers / 2
+ranks ≈ 1.5 GB a rank, 6.5 ms at DRAM speed, 3.5 ms measured, so rows already share about half their experts). The
+16-row round cap binds at 8 lanes (8 pending rows + 8 drafts), which is why the aggregate flattens; `TF_DS_ROUND_ROWS`
+raises it at run time, but the kit has no kernel variants past 16 rows (`MissingTritonVariant` at 24 or 32), and a
+round-cost model (20 ms + 3.5 ms a row against ~0.5 extra tokens a row at these acceptance rates) predicts no gain
+from wider rounds anyway.
+
+## The prompt-cache store holds 80 states, whatever their length
+
+A kept state is two things: the stream's rows in the shared compressed plane (0.85 KB a token a rank; they spill to
+NVMe when the plane needs the room, 7–20 ms a write, 10–20 ms a read back) and the slot's own part — every layer's
+window ring and the positional stores — which is the same ~6.4 MiB whether the prompt is 4K or 140K tokens. The store's
+budget (`--prompt-cache-gib`, default 0.5) counts the second part only, so it is a cap of ~80 states: about 40–47
+requests of history on a four-agent workload (each turn keeps one or two states). A conversation that pauses longer
+than that (an agent waiting on a long tool, a planner waiting on its workers) loses its state and prefills from zero:
+in 30 h of production logs, 20 such losses of 100–160K-token conversations (23–89 min idle), ~45 s each.
+`--prompt-cache-gib 2` holds ~320 states (1.5 GiB more device memory; measured: the 8-lane server starts in 151 s
+with 6.5 GiB left on the node). Patch 0019 adds `TF_PC_TRACE=1`, which logs what every miss would have resumed
+(the longest kept prefix) and why every eviction happened, so a prompt the client rewrote can be told from a state
+the store let go.
+
+## Decode rounds between the chunks of a long prompt (patch 0020)
+
+A prompt pass ran to its end before any other stream got a round, so a 100K-token prompt (~45 s) froze the other
+agents for that long. `TF_DS_PF_YIELD=N` runs up to N decode rounds for the live streams between two chunks and sends
+their tokens. Every reply stays byte-identical (the same computations in another order), but the GPU is the shared
+resource, so this is a fairness setting, not a speedup: with three greedy streams and a 32K prompt sent 3 s after
+them, the prompt's first token comes at 13.0 s (unset), 15.9 s (N=4), 20.6 s (N=12), the three streams get 1, 33
+and 97 rounds meanwhile instead of none, and the wall time of all four is the same within 1 %
+(`results/interleave_yield.jsonl`). Default: unset (the old order).
+
 ## Where the time goes
 
 These measurements guide the next patches.
@@ -258,6 +306,12 @@ These measurements guide the next patches.
   often drafts land (predicted 0.80–0.86, landed 0.78–0.87, at T=0 and T=1).
 - More than 4 streams or 16 rows a round: the kit has no row-invariant kernels past 16 rows
   (`MissingTritonVariant`), and batching past them would change replies.
+
+- Decode rounds for the live streams between a long prompt's chunks (patch 0020): byte-identical replies and no
+  stream frozen, but the same total time; the prompt's own first token comes later by exactly the rounds' time.
+- A 2M-token pool for more kept states: `--context` cannot exceed the model's 1,048,576-token window (the pool is the
+  context), and the spill already keeps evicted rows at ~2 s a restore, so retention is bounded by the store's budget
+  (`--prompt-cache-gib`), not by the pool.
 
 ## Build and run
 

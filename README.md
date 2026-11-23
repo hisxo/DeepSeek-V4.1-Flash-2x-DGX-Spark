@@ -341,6 +341,9 @@ These measurements guide the next patches.
 
 - Decode rounds for the live streams between a long prompt's chunks (patch 0020): byte-identical replies and no
   stream frozen, but the same total time; the prompt's own first token comes later by exactly the rounds' time.
+- Prefetching each layer's most routed experts into L2 behind wo_b (their addresses from the expert tables, 4 experts,
+  8 or 16 MiB a layer, paced like the other prefetches): 2–5 % slower at 1 and 4 lanes with the same tokens — DRAM
+  has no idle window left there, so the bytes are extra bytes.
 - A 2M-token pool for more kept states: `--context` cannot exceed the model's 1,048,576-token window (the pool is the
   context), and the spill already keeps evicted rows at ~2 s a restore, so retention is bounded by the store's budget
   (`--prompt-cache-gib`), not by the pool.

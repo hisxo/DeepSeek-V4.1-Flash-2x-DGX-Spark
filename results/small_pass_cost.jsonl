@@ -1,0 +1,6 @@
+{"increment_requested": 400, "new_tokens_mean": 375, "prefill_s_mean": 0.499, "host_s_mean": 0.02, "tok_s": 751, "turns": 3}
+{"increment_requested": 1500, "new_tokens_mean": 1365, "prefill_s_mean": 0.957, "host_s_mean": 0.024, "tok_s": 1426, "turns": 3}
+{"increment_requested": 3000, "new_tokens_mean": 2716, "prefill_s_mean": 1.585, "host_s_mean": 0.028, "tok_s": 1714, "turns": 3}
+{"increment_requested": 4000, "new_tokens_mean": 3615, "prefill_s_mean": 2.042, "host_s_mean": 0.03, "tok_s": 1770, "turns": 3}
+{"increment_requested": 8000, "new_tokens_mean": 7216, "prefill_s_mean": 3.585, "host_s_mean": 0.036, "tok_s": 2013, "turns": 3}
+{"fit": {"fixed_s": 0.353, "ms_per_token": 0.452, "marginal_tok_s": 2214}, "conversation": "~55K cached tokens, 3 later turns an increment, greedy, 8-token replies, v9f, --parallel 4"}

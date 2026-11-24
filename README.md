@@ -258,8 +258,12 @@ turns of ~1,400 new tokens): the client's time to first token, 0.91–0.99 s, is
 the server's is the prompt pass (0.89–0.98 s) plus 10–40 ms of host work (parse, tokenize, cache lookup, first
 draw) and 1–3 ms of network (`results/ttft_decomp_cached_turn.json`). Nothing is left on the HTTP or host side. What
 is left is the pass itself: 1,366 new tokens take 0.9 s, 1.5K tokens/s, where a 55K prompt runs at 2.5K tokens/s —
-a small pass pays the trellis decode of nearly every expert it touches whatever its row count. On a four-agent
-workload of ~6,000 turns a day that regime is about 1.5 GPU-hours a day, the largest remaining share of prefill.
+a small pass pays costs that do not shrink with its row count. Measured by increment on a ~55K-token cached
+conversation (`results/small_pass_cost.jsonl`): 375 new tokens 0.50 s, 1,365 → 0.96 s, 2,716 → 1.59 s, 3,615 → 2.04 s,
+7,216 → 3.59 s, i.e. **0.35 s a pass plus 0.45 ms a token** (2.2K tokens/s at the margin, the long-prompt rate). The
+fixed part is per chunk — the exact tail (patch 0012) cuts every pass into two chunks, the last one 130 rows — and a
+chunk's 80 TP all-gathers and its MoE floor (nearly every expert touched is read and trellis-decoded once) do not care
+how many rows it has. On a four-agent workload of ~6,000 turns a day the fixed part alone is ~0.6 GPU-hours a day.
 
 ## Six conversations in flight: the cache collapse, and its fix (patch 0025)
 

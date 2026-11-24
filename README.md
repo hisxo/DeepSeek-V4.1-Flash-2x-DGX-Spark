@@ -342,6 +342,27 @@ These measurements guide the next patches.
   28 %, NCCL gathers 13 %, mHC mixes 10 %, Engram 5 %. Nsight Compute on the MoE kernels: ~31 instructions issued
   per tensor-core MMA (EXL3 trellis decoding), 33 % / 17 % occupancy, latency-bound, not DRAM- or tensor-bound.
 
+## The adaptive top-k threshold, swept under the security evals
+
+Patch 0004's `TF_DS_TOPK_TAU` (the confidence above which a decode window routes fewer than 6 experts, down to
+`TF_DS_TOPK_MIN`) changes tokens, so every setting ran the same evals as the recommended 0.45 / 4 (thinking on and
+off, T=0: CyberMetric 500, MMLU computer security 100; `results/topk_tau_sweep.jsonl`, 1017 EAQ weights, v7 settings):
+
+| TAU / MIN | 1 lane, thinking | 4 lanes, thinking | CyberMetric off | MMLU-CS off | CyberMetric on (150) | MMLU-CS on |
+|---|---|---|---|---|---|---|
+| 0.45 / 4 (recommended) | 77.5 tok/s | 124.8 | 478/500 | 85 | 143 | 84 |
+| 0.55 / 4 | 83.8 | 129.7 | 478 | 85 | 143 | 82 |
+| 0.65 / 4 | 84.4 | 132.3 | 478 | 85 | 143 | 84 |
+| 0.55 / 3 | 84.9 | 139.7 | 478 | 85 | 142 | 83 |
+| 0.65 / 3 | — | — | 478 | 85 | 142 | 83 |
+
+- Thinking off never moves: the 4,096-token answers of these questions rarely cross the threshold.
+- `MIN=3` is the fast one (+12 % at 4 lanes) and the one that loses: on the longer gate (CyberMetric thinking on over
+  300 questions and MMLU-CS over 100, 4,096-token cap) 0.55 / 3 scores 288 against 289 and **85 against 89**, with twice
+  the answers cut by the cap. Not proposed.
+- `0.65 / 4` is +9 % at one lane and +6 % at four with the same scores as 0.45 / 4 on this sweep; the longer gate
+  (and GSM8K / MMLU with thinking off) has not run for it yet, so 0.45 / 4 stays the recommendation.
+
 ## Tried, no gain
 
 - NCCL protocols (LL, LL128, auto) and tuning (channels, QPs per connection, GPUDirect level, buffer size).
@@ -373,6 +394,14 @@ These measurements guide the next patches.
 - A 2M-token pool for more kept states: `--context` cannot exceed the model's 1,048,576-token window (the pool is the
   context), and the spill already keeps evicted rows at ~2 s a restore, so retention is bounded by the store's budget
   (`--prompt-cache-gib`), not by the pool.
+- Prompt chunks of 8,192 rows (patch 0005 doubled): the kit's prompt kernels have no variants past 4,096 rows, and the
+  prompt buffers take 5 GB more a rank.
+- Sending medium passes (a 1,000-token turn on a cached prompt) through the exact 64-row tail path by raising its row
+  count: the exact MoE kernel's launch geometry is bound to 64 rows (`CUDA_ERROR_INVALID_VALUE` on the first prompt).
+  A cached turn's pass costs 0.35 s plus 0.45 ms a token (`results/small_pass_cost.jsonl`), and the fixed part is in
+  each chunk's 80 gathers and MoE floor, not in a knob.
+- A fixed arena (`TF_DS_ARENA_GIB=8`) leaves 1 GB free on a rank and decodes 8–10 % slower than the default, growing
+  one; 9–10 GiB does not load the model. Leave it alone.
 
 ## Build and run
 

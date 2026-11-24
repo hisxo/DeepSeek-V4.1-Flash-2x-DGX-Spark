@@ -54,6 +54,7 @@ experts: replies differ, quality and security-knowledge scores do not (Results).
 | 0019 | `TF_PC_TRACE=1`: the prompt-cache store logs, at each miss, the kept state sharing the longest prefix with the prompt (and whether a whole state matched yet was not resumed), and at each eviction the victim and why. Tells a prompt the client rewrote from a state the store let go. | off |
 | 0020 | `TF_DS_PF_YIELD=N`: between two chunks of a prompt pass the lane host runs up to N decode rounds for the streams already live and sends their tokens, so a long prompt no longer freezes them. Same replies; the GPU is shared, so the prompt's first token comes later by the rounds' time (a fairness setting, not a speedup; see below). | off |
 | 0021 | `TF_DS_ROUTE_HIST=1`: a per-layer histogram of the routed experts (one atomic add a slot, inside the graph), printed by `tf-dsv41-lanes` at the end of a run. Free (same speed, same tokens). | off |
+| 0025 | The store's `find()` skips kept states the backend cannot resume for this prompt (a tail cut within 130 rows of the new prompt's end, a state gone stale without a spill) and takes the next longest instead of letting the pass run from 0. Fixes the cache collapse at 6 concurrent conversations (below). | on |
 
 ## Results
 
@@ -259,6 +260,27 @@ draw) and 1–3 ms of network (`results/ttft_decomp_cached_turn.json`). Nothing 
 is left is the pass itself: 1,366 new tokens take 0.9 s, 1.5K tokens/s, where a 55K prompt runs at 2.5K tokens/s —
 a small pass pays the trellis decode of nearly every expert it touches whatever its row count. On a four-agent
 workload of ~6,000 turns a day that regime is about 1.5 GPU-hours a day, the largest remaining share of prefill.
+
+## Six conversations in flight: the cache collapse, and its fix (patch 0025)
+
+The multi-turn security eval (30 chats of 10 questions over ~14K tokens of shared notes, every turn resumed from the
+cache; `results/chain_eval_concurrency.jsonl`) on an 8-lane server with the 2 GiB store:
+
+| | 4 chats in flight | 6 | 8 |
+|---|---:|---:|---:|
+| before (0019–0021): tokens re-prefilled a later turn | 244 | **4,704** | 4,902 |
+| before: failed resumes of 300 | 2–3 | **116** | — |
+| before: eval wall time | 180 s | **806 s** | 841 s |
+| with 0025: tokens re-prefilled a later turn | 244 | **181** | |
+| with 0025: failed resumes | 0 | **0** | |
+| with 0025: eval wall time | 168 s | **126 s** | |
+
+The score is 284–285 / 300 in every cell. The store handed the backend the longest kept state whose tokens prefix the
+prompt; when the backend could not start from it — an exact tail within 130 rows of the new prompt's end, as a sibling
+conversation of about the same length leaves one — the pass ran from 0 although a shorter usable state (the chunk
+grid's, the shared cut's) was there. With more conversations in flight that case multiplies. Patch 0025 lets `find()`
+ask the backend (`usable(saved, len)`) and fall back; six conversations then run 25 % faster than four (the lane
+scaling above), where before they ran 4.5× slower.
 
 ## The prompt-cache store holds 80 states, whatever their length
 
